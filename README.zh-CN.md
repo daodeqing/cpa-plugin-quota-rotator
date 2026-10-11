@@ -1,3 +1,5 @@
+> [English](README.md) | [中文说明](README.zh-CN.md)
+
 # 配额优先级轮换插件 (Quota Priority Rotator)
 
 适用于 [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的原生 CGO 动态调度器插件，实现严格的两阶段周限“即将刷新优先（Reset-soon first）”自动轮换机制。
