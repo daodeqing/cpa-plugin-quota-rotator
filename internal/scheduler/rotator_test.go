@@ -19,6 +19,7 @@ func TestRotator_Scenario1_FullCapacityRoundRobin(t *testing.T) {
 		AuthID:                 "acc-A",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 100.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(5 * 24 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -27,6 +28,7 @@ func TestRotator_Scenario1_FullCapacityRoundRobin(t *testing.T) {
 		AuthID:                 "acc-B",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 100.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(2 * 24 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -71,6 +73,7 @@ func TestRotator_Scenario2_ResetSoonPriorityAt99Percent(t *testing.T) {
 		AuthID:                 "acc-A",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 99.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(3 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -79,6 +82,7 @@ func TestRotator_Scenario2_ResetSoonPriorityAt99Percent(t *testing.T) {
 		AuthID:                 "acc-B",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 99.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(4 * 24 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -154,6 +158,7 @@ func TestRotator_Scenario4_RecoveryToStageOneWhenAccountResets(t *testing.T) {
 		AuthID:                 "acc-A",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 95.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(3 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -161,6 +166,7 @@ func TestRotator_Scenario4_RecoveryToStageOneWhenAccountResets(t *testing.T) {
 		AuthID:                 "acc-B",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 90.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(20 * time.Hour),
 		IsHealthy:              true,
 	})
@@ -186,6 +192,7 @@ func TestRotator_Scenario4_RecoveryToStageOneWhenAccountResets(t *testing.T) {
 		AuthID:                 "acc-B",
 		Provider:               "codex",
 		WeeklyRemainingPercent: 100.0,
+		ShortWindowRemainingPercent: 100.0,
 		WeeklyResetAt:          now.Add(7 * 24 * time.Hour),
 		IsHealthy:              true,
 	})
