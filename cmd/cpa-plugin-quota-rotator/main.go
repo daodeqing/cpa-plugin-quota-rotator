@@ -250,7 +250,7 @@ func handleManagement(raw []byte) ([]byte, error) {
 func jsonResponse(status int, body any) pluginapi.ManagementResponse {
 	raw, err := json.Marshal(body)
 	if err != nil {
-		status, raw = http.StatusInternalServerError, []byte("{"error":"encode response"}")
+		status, raw = http.StatusInternalServerError, []byte(`{"error":"encode response"}`)
 	}
 	return pluginapi.ManagementResponse{
 		StatusCode: status,

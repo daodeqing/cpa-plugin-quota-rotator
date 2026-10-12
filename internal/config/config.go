@@ -1,11 +1,11 @@
 package config
 
 import (
-	strings
-	time
+	"strings"
+	"time"
 
-	gopkg.in/yaml.v3
-o
+	"gopkg.in/yaml.v3"
+)
 
 // Config defines the user-configurable options for the quota rotator plugin.
 type Config struct {
@@ -30,7 +30,7 @@ func DefaultConfig() Config {
 
 // Parse parses YAML configuration bytes and applies default fallbacks.
 func Parse(raw []byte) (Config, error) {
-	cfg : = DefaultConfig()
+	cfg := DefaultConfig()
 	if len(raw) == 0 {
 		return cfg, nil
 	}
