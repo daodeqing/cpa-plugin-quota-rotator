@@ -293,6 +293,11 @@ func pluginRegistration() registration {
 					Type:        pluginapi.ConfigFieldTypeString,
 					Description: "Antigravity model group to track (e.g. gemini, claude_gpt).",
 				},
+				{
+					Name:        "parallel_count",
+					Type:        pluginapi.ConfigFieldTypeInteger,
+					Description: "Number of reset-soon accounts to consume in parallel (default 1).",
+				},
 			},
 		},
 		Capabilities: capabilities{

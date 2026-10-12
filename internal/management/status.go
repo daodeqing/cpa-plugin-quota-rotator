@@ -26,6 +26,7 @@ type StatusResponse struct {
 	StrictShortWindow bool              `json:"strict_short_window"`
 	RefreshInterval   string            `json:"refresh_interval"`
 	Providers         []string          `json:"providers"`
+	ParallelCount     int               `json:"parallel_count"`
 	ActiveStages      map[string]string `json:"active_stages"`
 	LastPickedIDs     map[string]string `json:"last_picked_ids"`
 	Accounts          []AccountView     `json:"accounts"`
@@ -72,6 +73,7 @@ func BuildStatusResponse(cfg config.Config, rot *scheduler.Rotator, cache *quota
 		StrictShortWindow: cfg.StrictShortWindow,
 		RefreshInterval:   cfg.RefreshInterval,
 		Providers:         cfg.Providers,
+		ParallelCount:     cfg.GetParallelCount(),
 		ActiveStages:      stages,
 		LastPickedIDs:     picks,
 		Accounts:          views,

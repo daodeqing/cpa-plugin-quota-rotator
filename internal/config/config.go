@@ -14,7 +14,7 @@ type Config struct {
 	RefreshInterval   string   `yaml:"refresh_interval" json:"refresh_interval"`
 	Providers         []string `yaml:"providers" json:"providers"`
 	AntigravityGroup  string   `yaml:"antigravity_group" json:"antigravity_group"`
-
+	ParallelCount     int      `yaml:"parallel_count" json:"parallel_count"`
 }
 
 // DefaultConfig returns the recommended default plugin configuration.
@@ -25,6 +25,7 @@ func DefaultConfig() Config {
 		RefreshInterval:   "10m",
 		Providers:         []string{"codex", "antigravity"},
 		AntigravityGroup:  "gemini",
+		ParallelCount:     1,
 	}
 }
 
@@ -67,4 +68,12 @@ func (c *Config) ShouldHandleProvider(provider string) bool {
 		}
 	}
 	return false
+}
+
+// GetParallelCount returns the configured parallel count, clamped to >= 1.
+func (c *Config) GetParallelCount() int {
+	if c == nil || c.ParallelCount <= 1 {
+		return 1
+	}
+	return c.ParallelCount
 }

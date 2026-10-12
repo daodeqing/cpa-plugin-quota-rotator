@@ -203,3 +203,97 @@ func TestRotator_Scenario4_RecoveryToStageOneWhenAccountResets(t *testing.T) {
 		t.Fatalf("Expected recovery to Stage 1 acc-B, got %v (%s)", idAfter, stageAfter)
 	}
 }
+
+func TestRotator_Scenario5_ParallelResetSoonAccounts(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ParallelCount = 2 // Allow top 2 reset-soon accounts to consume in parallel
+	cache := quota.NewCache()
+	now := time.Now()
+
+	// 3 accounts at 99% weekly quota:
+	// acc-A: 2h countdown
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-A",
+		Provider:                    "codex",
+		WeeklyRemainingPercent:      99.0,
+		ShortWindowRemainingPercent: 100.0,
+		WeeklyResetAt:               now.Add(2 * time.Hour),
+		IsHealthy:                   true,
+	})
+	// acc-B: 4h countdown
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-B",
+		Provider:                    "codex",
+		WeeklyRemainingPercent:      99.0,
+		ShortWindowRemainingPercent: 100.0,
+		WeeklyResetAt:               now.Add(4 * time.Hour),
+		IsHealthy:                   true,
+	})
+	// acc-C: 24h countdown
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-C",
+		Provider:                    "codex",
+		WeeklyRemainingPercent:      99.0,
+		ShortWindowRemainingPercent: 100.0,
+		WeeklyResetAt:               now.Add(24 * time.Hour),
+		IsHealthy:                   true,
+	})
+
+	rot := NewRotator(cfg, cache, nil)
+	req := pluginapi.SchedulerPickRequest{
+		Provider: "codex",
+		Model:    "gpt-5",
+		Candidates: []pluginapi.SchedulerAuthCandidate{
+			{ID: "acc-A", Priority: 1},
+			{ID: "acc-B", Priority: 1},
+			{ID: "acc-C", Priority: 1},
+		},
+	}
+
+	// 1st request -> acc-A (shortest countdown)
+	resp1, stage1, id1 := rot.Pick(req, now)
+	if !resp1.Handled || resp1.AuthID != "acc-A" || stage1 != StageResetSoon {
+		t.Fatalf("Pick 1 expected acc-A, got %s (%s)", id1, stage1)
+	}
+
+	// 2nd request -> acc-B (parallel top-2 round-robin)
+	resp2, stage2, id2 := rot.Pick(req, now)
+	if !resp2.Handled || resp2.AuthID != "acc-B" || stage2 != StageResetSoon {
+		t.Fatalf("Pick 2 expected acc-B, got %s (%s)", id2, stage2)
+	}
+
+	// 3rd request -> acc-A (cycles back in top-2)
+	resp3, _, id3 := rot.Pick(req, now)
+	if !resp3.Handled || resp3.AuthID != "acc-A" {
+		t.Fatalf("Pick 3 expected acc-A, got %s", id3)
+	}
+
+	// 4th request -> acc-B (acc-C is untouched)
+	resp4, _, id4 := rot.Pick(req, now)
+	if !resp4.Handled || resp4.AuthID != "acc-B" {
+		t.Fatalf("Pick 4 expected acc-B, got %s", id4)
+	}
+
+	// Now acc-A short window exhausts (0%)!
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-A",
+		Provider:                    "codex",
+		WeeklyRemainingPercent:      95.0,
+		ShortWindowRemainingPercent: 0.0,
+		WeeklyResetAt:               now.Add(2 * time.Hour),
+		IsHealthy:                   true,
+	})
+
+	// 5th request: acc-A is bypassed! New top-2 are acc-B and acc-C.
+	// Current round-robin index picks acc-B
+	resp5, _, id5 := rot.Pick(req, now)
+	if !resp5.Handled || resp5.AuthID != "acc-B" {
+		t.Fatalf("Pick 5 expected acc-B, got %s", id5)
+	}
+
+	// 6th request: round-robin within (B, C) -> picks acc-C!
+	resp6, _, id6 := rot.Pick(req, now)
+	if !resp6.Handled || resp6.AuthID != "acc-C" {
+		t.Fatalf("Pick 6 expected acc-C, got %s", id6)
+	}
+}

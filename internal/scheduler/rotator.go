@@ -161,7 +161,20 @@ func (r *Rotator) Pick(req pluginapi.SchedulerPickRequest, now time.Time) (plugi
 		return active[i].Candidate.ID < active[j].Candidate.ID
 	})
 
-	picked := active[0]
+	parallelCount := r.cfg.GetParallelCount()
+	if parallelCount > len(active) {
+		parallelCount = len(active)
+	}
+
+	topCandidates := active[:parallelCount]
+
+	idx := r.rrIndices[routeKey]
+	if idx >= len(topCandidates) {
+		idx = 0
+	}
+	picked := topCandidates[idx]
+	r.rrIndices[routeKey] = (idx + 1) % len(topCandidates)
+
 	r.lastStages[routeKey] = StageResetSoon
 	r.lastPickedIDs[routeKey] = picked.Candidate.ID
 
