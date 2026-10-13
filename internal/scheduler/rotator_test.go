@@ -297,3 +297,70 @@ func TestRotator_Scenario5_ParallelResetSoonAccounts(t *testing.T) {
 		t.Fatalf("Pick 6 expected acc-C, got %s", id6)
 	}
 }
+
+func TestRotator_Scenario6_PinnedAccountPriority(t *testing.T) {
+	cfg := config.DefaultConfig()
+	// Pin acc-C to high priority 20, and pin acc-backup to low priority 0
+	cfg.PinnedAccounts = []string{"acc-C=20", "acc-backup=0"}
+	cache := quota.NewCache()
+	now := time.Now()
+
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-A",
+		Provider:                    "antigravity",
+		WeeklyRemainingPercent:      60.0,
+		ShortWindowRemainingPercent: 90.0,
+		WeeklyResetAt:               now.Add(4 * time.Hour),
+		IsHealthy:                   true,
+		ComputedPriority:            4,
+	})
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-C",
+		Provider:                    "antigravity",
+		WeeklyRemainingPercent:      95.0,
+		ShortWindowRemainingPercent: 95.0,
+		WeeklyResetAt:               now.Add(5 * 24 * time.Hour),
+		IsHealthy:                   true,
+	})
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-backup",
+		Provider:                    "antigravity",
+		WeeklyRemainingPercent:      100.0,
+		ShortWindowRemainingPercent: 100.0,
+		WeeklyResetAt:               now.Add(7 * 24 * time.Hour),
+		IsHealthy:                   true,
+	})
+
+	rot := NewRotator(cfg, cache, nil)
+	req := pluginapi.SchedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Candidates: []pluginapi.SchedulerAuthCandidate{
+			{ID: "acc-A", Priority: 4},
+			{ID: "acc-C", Priority: 20},
+			{ID: "acc-backup", Priority: 0},
+		},
+	}
+
+	// 1. Pinned high-priority acc-C (20 > 4) must be selected first
+	resp1, stage1, id1 := rot.Pick(req, now)
+	if !resp1.Handled || id1 != "acc-C" || stage1 != StagePinned {
+		t.Fatalf("Expected pinned high-priority acc-C, got %s (%s)", id1, stage1)
+	}
+
+	// 2. When acc-C short window exhausts, acc-A (auto-rotated priority 4) is picked,
+	// while acc-backup (pinned at 0 < 4) is still held back as reserve!
+	cache.Set(&quota.AccountQuotaInfo{
+		AuthID:                      "acc-C",
+		Provider:                    "antigravity",
+		WeeklyRemainingPercent:      95.0,
+		ShortWindowRemainingPercent: 0.0,
+		WeeklyResetAt:               now.Add(5 * 24 * time.Hour),
+		IsHealthy:                   true,
+	})
+
+	resp2, stage2, id2 := rot.Pick(req, now)
+	if !resp2.Handled || id2 != "acc-A" || stage2 != StageResetSoon {
+		t.Fatalf("Expected auto-rotated acc-A while acc-backup is pinned at 0, got %s (%s)", id2, stage2)
+	}
+}

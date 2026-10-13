@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Go-1.26-00ADD8.svg" alt="Go Version">
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-orange.svg" alt="CPA Support">
-  <img src="https://img.shields.io/badge/Release-v1.1.1-green.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.2.0-green.svg" alt="Release">
 </p>
 
 ---
@@ -31,6 +31,7 @@
   - **满额轮询（100%）**：存在满额健康账号时，请求在 100% 账号间均匀分摊，避免单号过早被过度消耗。
   - **即将刷新优先（≤ 99%）**：全员降至 99% 时，自动按周限刷新倒计时排序，请求全力导向最快重置的账号，最大化利用即将过期的额度。
   - **自定义并行数（`parallel_count`）**：支持设置前 $N$ 个临期账号并行轮询分摊，避免高并发把单个临期号的短窗或速率限制打爆。
+  - **支持固定指定账号优先级（`pinned_accounts`）**：可锁定特定账号的优先级（如固定主力号或固定保底备用号），不随自动轮换被覆盖；点击【刷新额度】时自动同步并刷新卡片优先级排序。
   - **双重硬避让与自动复位**：周限 0% 或 5 小时短窗用尽时自动剔除避让；任一账号到期重置回 100% 后，无缝自动复位回满额轮询。
 - **最适合什么人用？**
   1. **多账号持有者**：拥有 3 个或更多 Codex / Antigravity 账号，发愁周额度到期刷新前未用完被浪费。
@@ -44,6 +45,7 @@
   - **Full-Capacity Round-Robin (100%)**: Balances requests evenly across 100% accounts to prevent premature depletion of fresh quota.
   - **Reset-Soon First (≤ 99%)**: When all healthy accounts decrease to ≤99%, automatically prioritizes accounts closest to their weekly reset to maximize quota utilization.
   - **Multi-Account Parallelism (`parallel_count`)**: Allows setting top-$N$ reset-soon accounts to distribute traffic, preventing short-window exhaustion and rate-limit spikes under high concurrency.
+  - **Pinned Account Priority (`pinned_accounts`)**: Pin specific accounts to a fixed priority (e.g. `user@gmail.com` or `user@gmail.com=10`) so they are never overwritten during automatic quota rotation.
   - **Health Guard & Auto-Recovery**: Strictly bypasses accounts with 0% weekly quota or 0% 5-hour short window; seamlessly reverts to Stage 1 when an account resets to 100%.
 - **Who Is It For?**
   1. **Multi-Account Users**: Managing 3+ Codex / Antigravity accounts who want to stop wasting expiring weekly quotas.

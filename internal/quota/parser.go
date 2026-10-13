@@ -118,12 +118,13 @@ func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (
 	}
 
 	type candidate struct {
+		window    string
 		remaining float64
 		resetAt   *time.Time
 	}
 	var candidates []candidate
 
-	add := func(modelText string, remainingRaw, resetRaw any) {
+	add := func(modelText, windowHint string, remainingRaw, resetRaw any) {
 		if !matchesModelGroup(modelText, group) {
 			return
 		}
@@ -134,11 +135,12 @@ func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (
 		if remainingValue <= 1.0 {
 			remainingValue *= 100.0
 		}
-		resetAt, ok := parseTime(resetRaw)
-		if !ok || resetAt == nil {
+		resetAt, _ := parseTime(resetRaw)
+		if resetAt == nil && remainingValue < 99.999 {
 			return
 		}
 		candidates = append(candidates, candidate{
+			window:    strings.ToLower(strings.TrimSpace(windowHint)),
 			remaining: math.Max(0, math.Min(100, remainingValue)),
 			resetAt:   resetAt,
 		})
@@ -152,17 +154,21 @@ func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (
 			if windows, ok := quota["windows"].([]any); ok && len(windows) > 0 {
 				for _, rawWindow := range windows {
 					window, _ := rawWindow.(map[string]any)
-					add(text, window["remainingFraction"], window["resetTime"])
+					winHint := firstString(window["window"])
+					if winHint == "" {
+						winHint = firstString(window["type"])
+					}
+					add(text, winHint, window["remainingFraction"], window["resetTime"])
 				}
 			} else if quota != nil {
-				add(text, quota["remainingFraction"], quota["resetTime"])
+				add(text, firstString(quota["window"]), quota["remainingFraction"], quota["resetTime"])
 			}
 		}
 	}
 	if buckets, ok := root["buckets"].([]any); ok {
 		for _, rawBucket := range buckets {
 			bucket, _ := rawBucket.(map[string]any)
-			add(firstString(bucket["modelId"]), bucket["remainingFraction"], bucket["resetTime"])
+			add(firstString(bucket["modelId"]), firstString(bucket["window"]), bucket["remainingFraction"], bucket["resetTime"])
 		}
 	}
 	if groups, ok := root["groups"].([]any); ok {
@@ -172,7 +178,7 @@ func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (
 			buckets, _ := quotaGroup["buckets"].([]any)
 			for _, rawBucket := range buckets {
 				bucket, _ := rawBucket.(map[string]any)
-				add(text, bucket["remainingFraction"], bucket["resetTime"])
+				add(text, firstString(bucket["window"]), bucket["remainingFraction"], bucket["resetTime"])
 			}
 		}
 	}
@@ -186,18 +192,29 @@ func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (
 	var weeklyCandidate, shortCandidate *candidate
 	for i := range candidates {
 		cand := &candidates[i]
-		resetAfter := time.Duration(0)
-		if cand.resetAt != nil {
-			resetAfter = cand.resetAt.Sub(now)
+		w := cand.window
+		var isShort bool
+		if w == "weekly" || strings.Contains(w, "week") || strings.Contains(w, "7d") {
+			isShort = false
+		} else if w == "5h" || strings.Contains(w, "5h") || strings.Contains(w, "hour") || strings.Contains(w, "short") || strings.Contains(w, "primary") {
+			isShort = true
+		} else {
+			resetAfter := time.Duration(0)
+			if cand.resetAt != nil {
+				resetAfter = cand.resetAt.Sub(now)
+			}
+			isShort = resetAfter > 0 && resetAfter <= 8*time.Hour
 		}
-		isShort := resetAfter > 0 && resetAfter <= 8*time.Hour
+
 		if isShort {
-			if shortCandidate == nil || cand.remaining < shortCandidate.remaining {
+			if shortCandidate == nil || cand.remaining < shortCandidate.remaining ||
+				(cand.remaining == shortCandidate.remaining && cand.resetAt != nil && (shortCandidate.resetAt == nil || cand.resetAt.Before(*shortCandidate.resetAt))) {
 				shortCandidate = cand
 			}
 			continue
 		}
-		if weeklyCandidate == nil || cand.remaining < weeklyCandidate.remaining {
+		if weeklyCandidate == nil || cand.remaining < weeklyCandidate.remaining ||
+			(cand.remaining == weeklyCandidate.remaining && cand.resetAt != nil && (weeklyCandidate.resetAt == nil || cand.resetAt.Before(*weeklyCandidate.resetAt))) {
 			weeklyCandidate = cand
 		}
 	}

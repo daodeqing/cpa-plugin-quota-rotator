@@ -61,6 +61,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -74,10 +75,13 @@ import (
 )
 
 var (
-	version     = "1.1.1"
-	repository  = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
-	pluginID    = "quota-rotator"
-	statusRoute = "/plugins/" + pluginID + "/status"
+	version      = "1.2.0"
+	repository   = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
+	pluginID     = "quota-rotator"
+	statusRoute  = "/plugins/" + pluginID + "/status"
+	refreshRoute = "/plugins/" + pluginID + "/refresh"
+	pinRoute     = "/plugins/" + pluginID + "/pin"
+	resourcePath = "/status"
 )
 
 var (
@@ -146,18 +150,26 @@ type capabilities struct {
 }
 
 type managementRegistration struct {
-	Routes []managementRoute `json:"routes"`
+	Routes    []managementRoute    `json:"routes,omitempty"`
+	Resources []managementResource `json:"resources,omitempty"`
 }
 
 type managementRoute struct {
 	Method      string `json:"method"`
 	Path        string `json:"path"`
-	Description string `json:"description"`
+	Description string `json:"description,omitempty"`
+}
+
+type managementResource struct {
+	Path        string `json:"path"`
+	Menu        string `json:"menu"`
+	Description string `json:"description,omitempty"`
 }
 
 type managementRequest struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
+	Body   []byte `json:"body"`
 }
 
 func main() {}
@@ -238,11 +250,32 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	case pluginabi.MethodQuotaReset:
 		return okEnvelope(pluginapi.QuotaResetResponse{Success: false, Message: "quota reset is not supported"})
 	case pluginabi.MethodManagementRegister:
-		return okEnvelope(managementRegistration{Routes: []managementRoute{{
-			Method:      http.MethodGet,
-			Path:        statusRoute,
-			Description: "Current Quota Rotator status: active stages, countdowns, and account states.",
-		}}})
+		return okEnvelope(managementRegistration{
+			Routes: []managementRoute{
+				{
+					Method:      http.MethodGet,
+					Path:        statusRoute,
+					Description: "Current Quota Rotator status: active stages, countdowns, priorities, and pinned accounts.",
+				},
+				{
+					Method:      http.MethodPost,
+					Path:        refreshRoute,
+					Description: "Ingest or refresh quota snapshots and immediately sync dynamic priorities to host credentials.",
+				},
+				{
+					Method:      http.MethodPost,
+					Path:        pinRoute,
+					Description: "Pin or unpin a specific account's priority so it is excluded from or included in auto-rotation.",
+				},
+			},
+			Resources: []managementResource{
+				{
+					Path:        resourcePath,
+					Menu:        "配额轮换看板",
+					Description: "实时查看两阶段配额轮换状态、周限刷新倒计时排序与固定优先级",
+				},
+			},
+		})
 	case pluginabi.MethodManagementHandle:
 		return handleManagement(request)
 	default:
@@ -292,9 +325,7 @@ func restartQuotaPoller(cfg config.Config) {
 	pollerCancel = cancel
 	pollerMu.Unlock()
 	go quota.RunPoller(ctx, quotaCache, nativeHostCaller{}, quota.PollerConfig{
-		Interval:         cfg.GetRefreshDuration(),
-		Providers:        cfg.Providers,
-		AntigravityGroup: cfg.AntigravityGroup,
+		Config: cfg,
 	})
 }
 
@@ -306,17 +337,26 @@ func fetchQuota(raw []byte) ([]byte, error) {
 	configMu.RLock()
 	cfg := activeConfig
 	configMu.RUnlock()
-	response, info, err := quota.FetchCredentialQuota(req.Provider, req.StorageJSON, nativeHostCaller{}, time.Now(), cfg.AntigravityGroup)
+	now := time.Now()
+	response, info, err := quota.FetchCredentialQuota(req.Provider, req.StorageJSON, nativeHostCaller{}, now, cfg.AntigravityGroup)
 	if err != nil {
 		return nil, err
 	}
 	if info != nil {
-		info.AuthID = req.AuthID
+		authID := strings.TrimSpace(req.AuthID)
+		if authID == "" {
+			authID = strings.TrimSpace(req.AuthIndex)
+		}
+		info.AuthID = authID
+		info.AuthIndex = strings.TrimSpace(req.AuthIndex)
 		quotaCache.Set(info)
-		if req.AuthIndex != "" && req.AuthIndex != req.AuthID {
+		if req.AuthIndex != "" && req.AuthIndex != authID {
 			copyInfo := *info
 			copyInfo.AuthID = req.AuthIndex
 			quotaCache.Set(&copyInfo)
+		}
+		if cfg.Enabled {
+			_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfg, now)
 		}
 	}
 	return okEnvelope(response)
@@ -331,19 +371,108 @@ func pick(raw []byte) ([]byte, error) {
 	return okEnvelope(resp)
 }
 
+type refreshManagementPayload struct {
+	AuthIndex string          `json:"auth_index"`
+	AuthID    string          `json:"auth_id"`
+	FileName  string          `json:"file_name"`
+	Email     string          `json:"email"`
+	Provider  string          `json:"provider"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type pinManagementPayload struct {
+	Account   string `json:"account"`
+	AuthIndex string `json:"auth_index"`
+	Pinned    bool   `json:"pinned"`
+	Priority  *int   `json:"priority,omitempty"`
+}
+
 func handleManagement(raw []byte) ([]byte, error) {
 	var req managementRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, fmt.Errorf("decode management request: %w", err)
 	}
-	if req.Method != http.MethodGet {
-		return okEnvelope(jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"}))
-	}
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	path := strings.TrimSpace(req.Path)
+	now := time.Now()
+
 	configMu.RLock()
 	cfg := activeConfig
 	configMu.RUnlock()
-	resp := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, time.Now())
-	return okEnvelope(jsonResponse(http.StatusOK, resp))
+
+	if method == http.MethodGet && (strings.HasSuffix(path, "/resource/plugins/"+pluginID+resourcePath) || path == resourcePath) {
+		status := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, now)
+		return okEnvelope(pluginapi.ManagementResponse{
+			StatusCode: http.StatusOK,
+			Headers:    http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:       management.RenderStatusPageHTML(status),
+		})
+	}
+
+	if method == http.MethodGet && strings.HasSuffix(path, statusRoute) {
+		resp := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, now)
+		return okEnvelope(jsonResponse(http.StatusOK, resp))
+	}
+
+	if method == http.MethodPost && strings.HasSuffix(path, refreshRoute) {
+		var body refreshManagementPayload
+		if len(req.Body) > 0 {
+			_ = json.Unmarshal(req.Body, &body)
+		}
+		if len(body.Payload) > 0 && strings.TrimSpace(body.Provider) != "" {
+			if info, err := quota.IngestUpstreamQuotaPayload(body.Provider, body.Payload, cfg.AntigravityGroup, now); err == nil && info != nil {
+				primaryID := strings.TrimSpace(body.AuthID)
+				if primaryID == "" {
+					primaryID = strings.TrimSpace(body.FileName)
+				}
+				if primaryID == "" {
+					primaryID = strings.TrimSpace(body.AuthIndex)
+				}
+				info.AuthID = primaryID
+				info.AuthIndex = strings.TrimSpace(body.AuthIndex)
+				info.FileName = strings.TrimSpace(body.FileName)
+				info.Email = strings.TrimSpace(body.Email)
+				quotaCache.Set(info)
+				if body.AuthIndex != "" && body.AuthIndex != primaryID {
+					copyInfo := *info
+					copyInfo.AuthID = strings.TrimSpace(body.AuthIndex)
+					quotaCache.Set(&copyInfo)
+				}
+				if cfg.Enabled {
+					_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfg, now)
+				}
+			}
+		} else if strings.TrimSpace(body.AuthIndex) != "" && cfg.Enabled {
+			_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfg, now)
+		} else {
+			quota.RefreshAllFromHostWithConfig(nativeHostCaller{}, quotaCache, cfg, now)
+		}
+		resp := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, time.Now())
+		return okEnvelope(jsonResponse(http.StatusOK, resp))
+	}
+
+	if method == http.MethodPost && strings.HasSuffix(path, pinRoute) {
+		var body pinManagementPayload
+		if err := json.Unmarshal(req.Body, &body); err != nil {
+			return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": "invalid request body"}))
+		}
+		target := strings.TrimSpace(body.Account)
+		if target == "" {
+			target = strings.TrimSpace(body.AuthIndex)
+		}
+		configMu.Lock()
+		errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, body.Pinned, body.Priority, now)
+		updatedCfg := activeConfig
+		configMu.Unlock()
+		if errPin != nil {
+			return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": errPin.Error()}))
+		}
+		rotScheduler.Configure(updatedCfg)
+		resp := management.BuildStatusResponse(updatedCfg, rotScheduler, quotaCache, time.Now())
+		return okEnvelope(jsonResponse(http.StatusOK, resp))
+	}
+
+	return okEnvelope(jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method or path not allowed"}))
 }
 
 func jsonResponse(status int, body any) pluginapi.ManagementResponse {
@@ -396,6 +525,11 @@ func pluginRegistration() registration {
 					Name:        "parallel_count",
 					Type:        pluginapi.ConfigFieldTypeInteger,
 					Description: "Number of reset-soon accounts to consume in parallel (default 1).",
+				},
+				{
+					Name:        "pinned_accounts",
+					Type:        pluginapi.ConfigFieldTypeArray,
+					Description: "Accounts with fixed priority excluded from auto-rotation (e.g. user@gmail.com or user@gmail.com=10).",
 				},
 			},
 		},

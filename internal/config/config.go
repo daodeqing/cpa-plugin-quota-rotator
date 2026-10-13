@@ -1,6 +1,8 @@
 package config
 
 import (
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ type Config struct {
 	Providers         []string `yaml:"providers" json:"providers"`
 	AntigravityGroup  string   `yaml:"antigravity_group" json:"antigravity_group"`
 	ParallelCount     int      `yaml:"parallel_count" json:"parallel_count"`
+	PinnedAccounts    []string `yaml:"pinned_accounts" json:"pinned_accounts"`
 }
 
 // DefaultConfig returns the recommended default plugin configuration.
@@ -26,6 +29,7 @@ func DefaultConfig() Config {
 		Providers:         []string{"codex", "antigravity"},
 		AntigravityGroup:  "gemini",
 		ParallelCount:     1,
+		PinnedAccounts:    []string{},
 	}
 }
 
@@ -76,4 +80,63 @@ func (c *Config) GetParallelCount() int {
 		return 1
 	}
 	return c.ParallelCount
+}
+
+// ParsePinnedSpec parses an entry from pinned_accounts such as "user@gmail.com=10"
+// or "antigravity-user@gmail.com.json" into a normalized identifier and optional priority.
+func ParsePinnedSpec(spec string) (pattern string, fixedPriority *int) {
+	s := strings.TrimSpace(spec)
+	if s == "" {
+		return "", nil
+	}
+	for _, sep := range []string{"=", ":"} {
+		if idx := strings.LastIndex(s, sep); idx > 0 && idx < len(s)-1 {
+			right := strings.TrimSpace(s[idx+1:])
+			if val, err := strconv.Atoi(right); err == nil {
+				left := strings.ToLower(strings.TrimSpace(s[:idx]))
+				return left, &val
+			}
+		}
+	}
+	return strings.ToLower(s), nil
+}
+
+// MatchPinnedAccount checks if any of the given account identifiers (ID, filename, email, auth_index)
+// matches a configured pinned_accounts entry.
+func (c *Config) MatchPinnedAccount(identifiers ...string) (pinned bool, fixedPriority *int) {
+	if c == nil || len(c.PinnedAccounts) == 0 {
+		return false, nil
+	}
+	normIDs := make([]string, 0, len(identifiers)*2)
+	for _, raw := range identifiers {
+		v := strings.ToLower(strings.TrimSpace(raw))
+		if v == "" {
+			continue
+		}
+		normIDs = append(normIDs, v)
+		base := filepath.Base(v)
+		if base != v {
+			normIDs = append(normIDs, base)
+		}
+		trimmed := strings.TrimSuffix(base, ".json")
+		if trimmed != base {
+			normIDs = append(normIDs, trimmed)
+		}
+	}
+	if len(normIDs) == 0 {
+		return false, nil
+	}
+	for _, rawSpec := range c.PinnedAccounts {
+		pat, prio := ParsePinnedSpec(rawSpec)
+		if pat == "" {
+			continue
+		}
+		patBase := strings.TrimSuffix(filepath.Base(pat), ".json")
+		for _, id := range normIDs {
+			if id == pat || id == patBase || (strings.Contains(pat, "@") && strings.Contains(id, pat)) {
+				return true, prio
+			}
+		}
+	}
+	return false, nil
 }

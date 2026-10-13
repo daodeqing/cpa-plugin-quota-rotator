@@ -6,15 +6,22 @@ import (
 
 // AccountQuotaInfo represents normalized quota snapshot for a single account.
 type AccountQuotaInfo struct {
-	AuthID                      string        `json:"auth_id"`
-	Provider                    string        `json:"provider"`
-	WeeklyRemainingPercent      float64       `json:"weekly_remaining_percent"`      // 0.0 to 100.0
-	WeeklyResetAt               time.Time     `json:"weekly_reset_at"`
-	ShortWindowRemainingPercent float64       `json:"short_window_remaining_percent"` // 5h window (0.0 to 100.0)
-	ShortWindowResetAt          time.Time     `json:"short_window_reset_at"`
-	IsHealthy                   bool          `json:"is_healthy"`
-	StatusMessage               string        `json:"status_message"`
-	ObservedAt                  time.Time     `json:"observed_at"`
+	AuthID                      string    `json:"auth_id"`
+	AuthIndex                   string    `json:"auth_index,omitempty"`
+	FileName                    string    `json:"file_name,omitempty"`
+	Email                       string    `json:"email,omitempty"`
+	Provider                    string    `json:"provider"`
+	WeeklyRemainingPercent      float64   `json:"weekly_remaining_percent"`       // 0.0 to 100.0
+	WeeklyResetAt               time.Time `json:"weekly_reset_at"`
+	ShortWindowRemainingPercent float64   `json:"short_window_remaining_percent"` // 5h window (0.0 to 100.0)
+	ShortWindowResetAt          time.Time `json:"short_window_reset_at"`
+	IsHealthy                   bool      `json:"is_healthy"`
+	Disabled                    bool      `json:"disabled,omitempty"`
+	IsPinned                    bool      `json:"is_pinned"`
+	PinnedPriority              *int      `json:"pinned_priority,omitempty"`
+	ComputedPriority            int       `json:"computed_priority"`
+	StatusMessage               string    `json:"status_message,omitempty"`
+	ObservedAt                  time.Time `json:"observed_at"`
 }
 
 // ResetCountdown returns remaining duration until weekly reset from reference time 'now'.
