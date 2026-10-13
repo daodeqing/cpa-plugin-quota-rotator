@@ -1,3 +1,13 @@
+# Release v1.1.1
+
+## English
+- Fixes native host HTTP response decoding so quota refresh results reach the scheduler cache.
+
+## 中文
+- 修复原生宿主 HTTP 响应字段解析，使刷新结果能够写入调度缓存。
+
+---
+
 # Release v1.1.0
 
 ## English

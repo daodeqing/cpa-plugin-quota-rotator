@@ -74,7 +74,7 @@ import (
 )
 
 var (
-	version     = "1.1.0"
+	version     = "1.1.1"
 	repository  = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID    = "quota-rotator"
 	statusRoute = "/plugins/" + pluginID + "/status"

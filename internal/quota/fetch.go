@@ -51,9 +51,36 @@ type hostEnvelope struct {
 }
 
 type hostHTTPResponse struct {
-	StatusCode int                 `json:"status_code"`
-	Headers    map[string][]string `json:"headers,omitempty"`
-	Body       []byte              `json:"body,omitempty"`
+	StatusCode int
+	Headers    map[string][]string
+	Body       []byte
+}
+
+func (r *hostHTTPResponse) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		StatusCodeSnake int                 `json:"status_code"`
+		StatusCodeCamel int                 `json:"StatusCode"`
+		HeadersSnake    map[string][]string `json:"headers"`
+		HeadersCamel    map[string][]string `json:"Headers"`
+		BodySnake       []byte              `json:"body"`
+		BodyCamel       []byte              `json:"Body"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.StatusCode = raw.StatusCodeSnake
+	if r.StatusCode == 0 {
+		r.StatusCode = raw.StatusCodeCamel
+	}
+	r.Headers = raw.HeadersSnake
+	if len(r.Headers) == 0 {
+		r.Headers = raw.HeadersCamel
+	}
+	r.Body = raw.BodySnake
+	if len(r.Body) == 0 {
+		r.Body = raw.BodyCamel
+	}
+	return nil
 }
 
 type hostAuthListResponse struct {
