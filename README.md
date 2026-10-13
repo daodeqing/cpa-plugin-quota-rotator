@@ -27,12 +27,10 @@
 #### 🇨🇳 中文简介
 > **CLIProxyAPI 智能配额轮换调度器：满额自动负载均衡，临期优先榨干重置，支持多号并行防打爆。**
 
-- **核心功能**：
-  - **满额轮询（100%）**：存在满额健康账号时，请求在 100% 账号间均匀分摊，避免单号过早被过度消耗。
-  - **即将刷新优先（≤ 99%）**：全员降至 99% 时，自动按周限刷新倒计时排序，请求全力导向最快重置的账号，最大化利用即将过期的额度。
-  - **自定义并行数（`parallel_count`）**：支持设置前 $N$ 个临期账号并行轮询分摊，避免高并发把单个临期号的短窗或速率限制打爆。
-  - **支持固定指定账号优先级（`pinned_accounts`）**：可锁定特定账号的优先级（如固定主力号或固定保底备用号），不随自动轮换被覆盖；点击【刷新额度】时自动同步并刷新卡片优先级排序。
-  - **双重硬避让与自动复位**：周限 0% 或 5 小时短窗用尽时自动剔除避让；任一账号到期重置回 100% 后，无缝自动复位回满额轮询。
+- **核心三大功能**：
+  1. **满额轮询（100%）**：账号周额度 100% 时自动均匀分摊，避免单号过早耗尽。
+  2. **临期优先（≤99%）**：全员降至 ≤99% 时，优先消耗距离刷新倒计时最短的账号，榨干即将重置的过期额度。
+  3. **智能避让与锁定**：额度耗尽（0%）或短窗用尽自动跳过；支持多号并行防打爆与手动锁定指定账号优先级。
 - **最适合什么人用？**
   1. **多账号持有者**：拥有 3 个或更多 Codex / Antigravity 账号，发愁周额度到期刷新前未用完被浪费。
   2. **重度写代码用户**：Cursor / Cline / Codex CLI 高频调用者，需要稳定高可用与无感自动切号，告别手动盯倒计时。
@@ -41,12 +39,10 @@
 #### 🇬🇧 English Overview
 > **Smart Quota Rotator for CLIProxyAPI: Full-capacity load balancing, reset-soon first quota drain, and multi-account parallel protection.**
 
-- **Key Features**:
-  - **Full-Capacity Round-Robin (100%)**: Balances requests evenly across 100% accounts to prevent premature depletion of fresh quota.
-  - **Reset-Soon First (≤ 99%)**: When all healthy accounts decrease to ≤99%, automatically prioritizes accounts closest to their weekly reset to maximize quota utilization.
-  - **Multi-Account Parallelism (`parallel_count`)**: Allows setting top-$N$ reset-soon accounts to distribute traffic, preventing short-window exhaustion and rate-limit spikes under high concurrency.
-  - **Pinned Account Priority (`pinned_accounts`)**: Pin specific accounts to a fixed priority (e.g. `user@gmail.com` or `user@gmail.com=10`) so they are never overwritten during automatic quota rotation.
-  - **Health Guard & Auto-Recovery**: Strictly bypasses accounts with 0% weekly quota or 0% 5-hour short window; seamlessly reverts to Stage 1 when an account resets to 100%.
+- **3 Core Capabilities**:
+  1. **Full-Capacity Round-Robin (100%)**: Balances requests evenly across 100% accounts to prevent premature depletion.
+  2. **Reset-Soon First (≤99%)**: Prioritizes accounts closest to weekly reset when all drop to ≤99%, draining expiring quota before renewal.
+  3. **Smart Bypass & Pin**: Automatically bypasses 0% exhausted or rate-limited accounts; supports parallel dispatch and pinned account priorities.
 - **Who Is It For?**
   1. **Multi-Account Users**: Managing 3+ Codex / Antigravity accounts who want to stop wasting expiring weekly quotas.
   2. **Heavy Coding Developers**: Power users of Cursor, Cline, and Codex CLI who need automated, reliable failover without manual switching.
