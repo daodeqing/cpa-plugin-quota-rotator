@@ -3,7 +3,7 @@
   "name": "智能配额轮换调度器 (Smart Quota Rotator)",
   "description": "CLIProxyAPI 智能配额轮换调度器：满额(100%)自动负载均衡，临期(<=99%)按周限重置倒计时最短优先消耗，支持多号并行防打爆与指定账号固定优先级。 / Smart Quota Rotator for CLIProxyAPI: 100% full-capacity round-robin, <=99% reset-soon first routing, configurable parallel accounts, and pinned account priority support.",
   "author": "daodeqing",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "repository": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "homepage": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "license": "MIT",

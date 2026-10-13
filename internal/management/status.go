@@ -172,7 +172,7 @@ th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #334155}
 th{color:#94a3b8;font-weight:600}
 code{background:#0f172a;padding:2px 6px;border-radius:4px;font-family:monospace}
 </style></head><body>`)
-	buf.WriteString(`<div class="card"><h1>智能配额轮换调度器 (Smart Quota Rotator v1.2.0)</h1>`)
+	buf.WriteString(`<div class="card"><h1>智能配额轮换调度器 (Smart Quota Rotator v1.2.1)</h1>`)
 	buf.WriteString(`<div>规则：满额（100%）优先轮询；全员 ≤99% 时按周限刷新倒计时最短优先消耗；支持固定指定账号优先级。</div>`)
 	buf.WriteString(`<div class="meta">`)
 	if status.Enabled {

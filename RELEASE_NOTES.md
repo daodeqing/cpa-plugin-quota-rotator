@@ -1,4 +1,4 @@
-# Smart Quota Rotator v1.2.0 Release Notes
+# Smart Quota Rotator v1.2.1 Release Notes
 
 ## New Features & Fixes
 - **Fixed Antigravity Short-Reset Weekly Bucket Classification**: Explicitly inspects `bucket.window` (`"weekly"` vs `"5h"`) in `retrieveUserQuotaSummary` so weekly quotas with `< 8h` remaining until reset are never misclassified as 5-hour short windows.
