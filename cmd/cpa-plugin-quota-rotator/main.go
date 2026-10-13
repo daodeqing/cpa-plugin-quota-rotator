@@ -56,23 +56,25 @@ static void free_host_buffer(void* ptr, size_t len) {
 import "C"
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 	"unsafe"
 
-	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
-	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 	"github.com/daodeqing/cpa-plugin-quota-rotator/internal/config"
 	"github.com/daodeqing/cpa-plugin-quota-rotator/internal/management"
 	"github.com/daodeqing/cpa-plugin-quota-rotator/internal/quota"
 	"github.com/daodeqing/cpa-plugin-quota-rotator/internal/scheduler"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 var (
-	version     = "1.0.0"
+	version     = "1.1.0"
 	repository  = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID    = "quota-rotator"
 	statusRoute = "/plugins/" + pluginID + "/status"
@@ -82,6 +84,9 @@ var (
 	quotaCache   = quota.NewCache()
 	rotScheduler = scheduler.NewRotator(config.DefaultConfig(), quotaCache, nil)
 	activeConfig = config.DefaultConfig()
+	configMu     sync.RWMutex
+	pollerMu     sync.Mutex
+	pollerCancel context.CancelFunc
 )
 
 type envelope struct {
@@ -99,6 +104,34 @@ type lifecycleRequest struct {
 	ConfigYAML json.RawMessage `json:"config_yaml"`
 }
 
+type quotaFetchRequest struct {
+	pluginapi.QuotaFetchRequest
+	HostCallbackID string `json:"host_callback_id,omitempty"`
+}
+
+type nativeHostCaller struct{}
+
+func (nativeHostCaller) Call(method string, request []byte) ([]byte, error) {
+	if request == nil {
+		request = []byte(`{}`)
+	}
+	cMethod := C.CString(method)
+	defer C.free(unsafe.Pointer(cMethod))
+	cRequest := C.CBytes(request)
+	defer C.free(cRequest)
+	var response C.cliproxy_buffer
+	status := C.call_host_api(cMethod, (*C.uint8_t)(cRequest), C.size_t(len(request)), &response)
+	if status != 0 {
+		return nil, fmt.Errorf("host callback %s failed with status %d", method, int(status))
+	}
+	if response.ptr == nil || response.len == 0 {
+		return nil, fmt.Errorf("host callback %s returned an empty response", method)
+	}
+	raw := C.GoBytes(unsafe.Pointer(response.ptr), C.int(response.len))
+	C.free_host_buffer(response.ptr, response.len)
+	return raw, nil
+}
+
 type registration struct {
 	SchemaVersion uint32             `json:"schema_version"`
 	Metadata      pluginapi.Metadata `json:"metadata"`
@@ -109,6 +142,7 @@ type capabilities struct {
 	Scheduler                 bool `json:"scheduler"`
 	SchedulerAcrossPriorities bool `json:"scheduler_across_priorities"`
 	ManagementAPI             bool `json:"management_api"`
+	QuotaProvider             bool `json:"quota_provider"`
 }
 
 type managementRegistration struct {
@@ -138,6 +172,7 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
 	plugin.free_buffer = C.cliproxy_plugin_free_fn(C.cliproxyPluginFree)
 	plugin.shutdown = C.cliproxy_plugin_shutdown_fn(C.cliproxyPluginShutdown)
+	restartQuotaPoller(config.DefaultConfig())
 	return 0
 }
 
@@ -172,7 +207,14 @@ func cliproxyPluginFree(ptr unsafe.Pointer, _ C.size_t) {
 }
 
 //export cliproxyPluginShutdown
-func cliproxyPluginShutdown() {}
+func cliproxyPluginShutdown() {
+	pollerMu.Lock()
+	if pollerCancel != nil {
+		pollerCancel()
+		pollerCancel = nil
+	}
+	pollerMu.Unlock()
+}
 
 func handleMethod(method string, request []byte) ([]byte, error) {
 	switch method {
@@ -183,6 +225,18 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 		return okEnvelope(pluginRegistration())
 	case pluginabi.MethodSchedulerPick:
 		return pick(request)
+	case pluginabi.MethodQuotaIdentifier:
+		return okEnvelope(map[string]string{"identifier": pluginID})
+	case pluginabi.MethodQuotaDescribe:
+		return okEnvelope(pluginapi.QuotaDescribeResponse{
+			SupportedProviders: []string{"codex", "antigravity"},
+			DisplayName:        "Smart Quota Rotator",
+			SupportsReset:      false,
+		})
+	case pluginabi.MethodQuotaFetch:
+		return fetchQuota(request)
+	case pluginabi.MethodQuotaReset:
+		return okEnvelope(pluginapi.QuotaResetResponse{Success: false, Message: "quota reset is not supported"})
 	case pluginabi.MethodManagementRegister:
 		return okEnvelope(managementRegistration{Routes: []managementRoute{{
 			Method:      http.MethodGet,
@@ -221,9 +275,51 @@ func configure(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	configMu.Lock()
 	activeConfig = cfg
+	configMu.Unlock()
 	rotScheduler.Configure(cfg)
+	restartQuotaPoller(cfg)
 	return nil
+}
+
+func restartQuotaPoller(cfg config.Config) {
+	pollerMu.Lock()
+	if pollerCancel != nil {
+		pollerCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pollerCancel = cancel
+	pollerMu.Unlock()
+	go quota.RunPoller(ctx, quotaCache, nativeHostCaller{}, quota.PollerConfig{
+		Interval:         cfg.GetRefreshDuration(),
+		Providers:        cfg.Providers,
+		AntigravityGroup: cfg.AntigravityGroup,
+	})
+}
+
+func fetchQuota(raw []byte) ([]byte, error) {
+	var req quotaFetchRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, fmt.Errorf("decode quota request: %w", err)
+	}
+	configMu.RLock()
+	cfg := activeConfig
+	configMu.RUnlock()
+	response, info, err := quota.FetchCredentialQuota(req.Provider, req.StorageJSON, nativeHostCaller{}, time.Now(), cfg.AntigravityGroup)
+	if err != nil {
+		return nil, err
+	}
+	if info != nil {
+		info.AuthID = req.AuthID
+		quotaCache.Set(info)
+		if req.AuthIndex != "" && req.AuthIndex != req.AuthID {
+			copyInfo := *info
+			copyInfo.AuthID = req.AuthIndex
+			quotaCache.Set(&copyInfo)
+		}
+	}
+	return okEnvelope(response)
 }
 
 func pick(raw []byte) ([]byte, error) {
@@ -243,7 +339,10 @@ func handleManagement(raw []byte) ([]byte, error) {
 	if req.Method != http.MethodGet {
 		return okEnvelope(jsonResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"}))
 	}
-	resp := management.BuildStatusResponse(activeConfig, rotScheduler, quotaCache, time.Now())
+	configMu.RLock()
+	cfg := activeConfig
+	configMu.RUnlock()
+	resp := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, time.Now())
 	return okEnvelope(jsonResponse(http.StatusOK, resp))
 }
 
@@ -263,7 +362,7 @@ func pluginRegistration() registration {
 	return registration{
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
-			Name:             "Quota Priority Rotator",
+			Name:             "智能配额轮换调度器 (Smart Quota Rotator)",
 			Version:          version,
 			Author:           "daodeqing",
 			GitHubRepository: repository,
@@ -304,6 +403,7 @@ func pluginRegistration() registration {
 			Scheduler:                 true,
 			SchedulerAcrossPriorities: true,
 			ManagementAPI:             true,
+			QuotaProvider:             true,
 		},
 	}
 }

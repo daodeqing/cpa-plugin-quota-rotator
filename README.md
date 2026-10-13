@@ -1,11 +1,12 @@
-# Quota Priority Rotator (`cpa-plugin-quota-rotator`)
+# 智能配额轮换调度器 / Smart Quota Rotator (`cpa-plugin-quota-rotator`)
 
 <p align="center">
   <b>A native dynamic scheduler plugin for <a href="https://github.com/router-for-me/CLIProxyAPI">CLIProxyAPI</a></b><br>
-  <b>CLIProxyAPI 账号配额自动两阶段优先级轮换插件（即将刷新优先）</b>
+  <b>满额自动负载均衡，临期优先榨干重置，支持多号并行防打爆</b>
 </p>
 
 <p align="center">
+  <a href="#quick-overview">Quick Overview</a> &bull;
   <a href="#english-documentation">English Documentation</a> &bull;
   <a href="#chinese-documentation">中文说明</a> &bull;
   <a href="README.zh-CN.md">独立中文文档 (README.zh-CN.md)</a>
@@ -13,10 +14,41 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
-  <img src="https://img.shields.io/badge/Go-1.23-00ADD8.svg" alt="Go Version">
+  <img src="https://img.shields.io/badge/Go-1.26-00ADD8.svg" alt="Go Version">
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-orange.svg" alt="CPA Support">
-  <img src="https://img.shields.io/badge/Release-v1.0.0-green.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.1.0-green.svg" alt="Release">
 </p>
+
+---
+
+<a name="quick-overview"></a>
+### ⚡ 核心功能与适用人群 (Quick Overview)
+
+#### 🇨🇳 中文简介
+> **CLIProxyAPI 智能配额轮换调度器：满额自动负载均衡，临期优先榨干重置，支持多号并行防打爆。**
+
+- **核心功能**：
+  - **满额轮询（100%）**：存在满额健康账号时，请求在 100% 账号间均匀分摊，避免单号过早被过度消耗。
+  - **即将刷新优先（≤ 99%）**：全员降至 99% 时，自动按周限刷新倒计时排序，请求全力导向最快重置的账号，最大化利用即将过期的额度。
+  - **自定义并行数（`parallel_count`）**：支持设置前 $N$ 个临期账号并行轮询分摊，避免高并发把单个临期号的短窗或速率限制打爆。
+  - **双重硬避让与自动复位**：周限 0% 或 5 小时短窗用尽时自动剔除避让；任一账号到期重置回 100% 后，无缝自动复位回满额轮询。
+- **最适合什么人用？**
+  1. **多账号持有者**：拥有 3 个或更多 Codex / Antigravity 账号，发愁周额度到期刷新前未用完被浪费。
+  2. **重度写代码用户**：Cursor / Cline / Codex CLI 高频调用者，需要稳定高可用与无感自动切号，告别手动盯倒计时。
+  3. **高并发与防风控需求者**：开启多号并行（如设置 2~3 个号同时跑），既能快速消耗临期额度，又能分摊单号 RPM 并发压力，防止触发 429 限流。
+
+#### 🇬🇧 English Overview
+> **Smart Quota Rotator for CLIProxyAPI: Full-capacity load balancing, reset-soon first quota drain, and multi-account parallel protection.**
+
+- **Key Features**:
+  - **Full-Capacity Round-Robin (100%)**: Balances requests evenly across 100% accounts to prevent premature depletion of fresh quota.
+  - **Reset-Soon First (≤ 99%)**: When all healthy accounts decrease to ≤99%, automatically prioritizes accounts closest to their weekly reset to maximize quota utilization.
+  - **Multi-Account Parallelism (`parallel_count`)**: Allows setting top-$N$ reset-soon accounts to distribute traffic, preventing short-window exhaustion and rate-limit spikes under high concurrency.
+  - **Health Guard & Auto-Recovery**: Strictly bypasses accounts with 0% weekly quota or 0% 5-hour short window; seamlessly reverts to Stage 1 when an account resets to 100%.
+- **Who Is It For?**
+  1. **Multi-Account Users**: Managing 3+ Codex / Antigravity accounts who want to stop wasting expiring weekly quotas.
+  2. **Heavy Coding Developers**: Power users of Cursor, Cline, and Codex CLI who need automated, reliable failover without manual switching.
+  3. **High-Concurrency Users**: Developers who need parallel consumption across multiple accounts to absorb bursts while avoiding 429 rate limits.
 
 ---
 

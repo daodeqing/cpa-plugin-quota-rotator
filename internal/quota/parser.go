@@ -103,11 +103,18 @@ func ParseCodexUsageJSON(raw []byte, now time.Time) (weeklyRem float64, weeklyRe
 
 // ParseAntigravityQuotaJSON parses Google Code Assist retrieveUserQuotaSummary payload.
 func ParseAntigravityQuotaJSON(raw []byte, group string, now time.Time) (weeklyRem float64, weeklyReset *time.Time, ok bool) {
+	weeklyRem, weeklyReset, _, _, ok = ParseAntigravityQuotaDetailsJSON(raw, group, now)
+	return weeklyRem, weeklyReset, ok
+}
+
+// ParseAntigravityQuotaDetailsJSON separates the weekly and five-hour buckets
+// returned by retrieveUserQuotaSummary.
+func ParseAntigravityQuotaDetailsJSON(raw []byte, group string, now time.Time) (weeklyRem float64, weeklyReset *time.Time, shortRem float64, shortReset *time.Time, ok bool) {
 	var root map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if decoder.Decode(&root) != nil {
-		return 0, nil, false
+		return 0, nil, 0, nil, false
 	}
 
 	type candidate struct {
@@ -171,17 +178,39 @@ func ParseAntigravityQuotaJSON(raw []byte, group string, now time.Time) (weeklyR
 	}
 
 	if len(candidates) == 0 {
-		return 0, nil, false
+		return 0, nil, 0, nil, false
 	}
 
-	// Select the tightest window (minimum remaining)
-	selected := candidates[0]
-	for _, cand := range candidates[1:] {
-		if cand.remaining < selected.remaining {
-			selected = cand
+	weeklyRem = 100.0
+	shortRem = 100.0
+	var weeklyCandidate, shortCandidate *candidate
+	for i := range candidates {
+		cand := &candidates[i]
+		resetAfter := time.Duration(0)
+		if cand.resetAt != nil {
+			resetAfter = cand.resetAt.Sub(now)
+		}
+		isShort := resetAfter > 0 && resetAfter <= 8*time.Hour
+		if isShort {
+			if shortCandidate == nil || cand.remaining < shortCandidate.remaining {
+				shortCandidate = cand
+			}
+			continue
+		}
+		if weeklyCandidate == nil || cand.remaining < weeklyCandidate.remaining {
+			weeklyCandidate = cand
 		}
 	}
-	return selected.remaining, selected.resetAt, true
+	if weeklyCandidate != nil {
+		weeklyRem, weeklyReset = weeklyCandidate.remaining, weeklyCandidate.resetAt
+	}
+	if shortCandidate != nil {
+		shortRem, shortReset = shortCandidate.remaining, shortCandidate.resetAt
+	}
+	if weeklyCandidate == nil && shortCandidate == nil {
+		return 0, nil, 0, nil, false
+	}
+	return weeklyRem, weeklyReset, shortRem, shortReset, true
 }
 
 func getFirstHeader(headers map[string][]string, key string) string {

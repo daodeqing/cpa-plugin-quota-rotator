@@ -1,9 +1,9 @@
 {
   "id": "quota-rotator",
-  "name": "Quota Priority Rotator (即将刷新优先)",
-  "description": "账号配额自动两阶段优先级轮换插件：满额（100%）账号优先轮询调度；所有账号降至99%及以下时，自动转为“即将刷新优先（Reset-soon first）”，全力优先消耗重置倒计时最短的账号；0%周限或短窗耗尽账号自动避让。 / Two-stage quota rotator for CLIProxyAPI: Full-capacity (100%) accounts round-robin first; when all accounts fall to <=99%, automatically activates Reset-Soon First routing to drain accounts closest to their weekly reset. Exhausted (0%) or 5h short-window exhausted accounts are strictly bypassed.",
+  "name": "智能配额轮换调度器 (Smart Quota Rotator)",
+  "description": "满额自动负载均衡，临期优先榨干重置，支持多号并行防打爆。周限100%账号轮询，降至≤99%自动切换刷新倒计时最短账号优先；0%周限与短窗耗尽硬避让。 / Full-capacity load balancing, reset-soon first quota drain, and multi-account parallel protection. Stage 1 round-robin for 100% accounts; Stage 2 reset-soon first for ≤99% accounts; strict bypass on 0% quota or short-window exhaustion.",
   "author": "daodeqing",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "repository": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "homepage": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "license": "MIT",

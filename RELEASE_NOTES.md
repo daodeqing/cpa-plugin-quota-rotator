@@ -1,3 +1,17 @@
+# Release v1.1.0
+
+## English
+- Adds a native quota provider for Codex and Antigravity.
+- Refreshes quota snapshots through CPA host callbacks and feeds weekly and five-hour windows into the scheduler.
+- Makes reset-soon routing and `parallel_count` use live quota data instead of an empty cache.
+
+## 中文
+- 新增 Codex 与 Antigravity 原生配额提供者。
+- 通过 CPA 宿主回调后台刷新周限额与五小时短窗，并写入调度缓存。
+- “即将刷新优先”和 `parallel_count` 开始使用实时配额数据。
+
+---
+
 # Release v1.0.0
 
 ## English

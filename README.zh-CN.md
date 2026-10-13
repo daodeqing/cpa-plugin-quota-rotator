@@ -1,8 +1,25 @@
-# 配额优先级轮换插件 (Quota Priority Rotator)
+# 智能配额轮换调度器 (Smart Quota Rotator)
 
 > [English Documentation](README.md) | [中文说明](README.zh-CN.md)
 
 适用于 [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) 的原生 CGO 动态调度器插件，实现严格的两阶段周限“即将刷新优先（Reset-soon first）”自动轮换机制。
+
+---
+
+### ⚡ 简短介绍
+
+> **CLIProxyAPI 智能配额轮换调度器：满额自动负载均衡，临期优先榨干重置，支持多号并行防打爆。**
+
+- **满额轮询（100%）**：在满额健康账号之间均匀分摊请求。
+- **即将刷新优先（≤99%）**：优先使用周限刷新倒计时最短的账号。
+- **自定义并行数（`parallel_count`）**：设置前 N 个临期账号并行分摊请求。
+- **自动避让与复位**：周限或短窗耗尽时避让，账号重置后自动恢复满额轮询。
+
+### 🎯 适合谁使用？
+
+- 拥有多个 Codex / Antigravity 账号的用户。
+- 使用 Cursor、Cline、Codex CLI 的高频开发者。
+- 需要多账号并发分摊、减少 429 限流的用户。
 
 ---
 
