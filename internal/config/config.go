@@ -51,7 +51,7 @@ func (c *Config) GetRefreshDuration() time.Duration {
 		return 10 * time.Minute
 	}
 	d, err := time.ParseDuration(c.RefreshInterval)
-	if err != nil || d < 1*time.Minute {
+	if err != nil || d < 5*time.Second {
 		return 10 * time.Minute
 	}
 	return d

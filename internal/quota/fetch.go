@@ -714,12 +714,10 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 			})
 		}
 
-		sortRecords(healthyActive)
-		sortRecords(healthyDisabled)
-
 		allHealthy := make([]*accountSyncRecord, 0, len(healthyActive)+len(healthyDisabled))
 		allHealthy = append(allHealthy, healthyActive...)
 		allHealthy = append(allHealthy, healthyDisabled...)
+		sortRecords(allHealthy)
 
 		totalHealthy := len(allHealthy)
 		topPriority := totalHealthy + 1
@@ -747,7 +745,7 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 					rec.targetPrio = topPriority - idx
 				}
 			} else {
-				if idx < parallelCount && idx < len(healthyActive) {
+				if idx < parallelCount {
 					rec.targetPrio = topPriority
 				} else {
 					rec.targetPrio = topPriority - idx
