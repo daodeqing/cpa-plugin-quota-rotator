@@ -61,6 +61,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -75,12 +79,13 @@ import (
 )
 
 var (
-	version      = "1.2.1"
+	version      = "1.2.2"
 	repository   = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID     = "quota-rotator"
 	statusRoute  = "/plugins/" + pluginID + "/status"
 	refreshRoute = "/plugins/" + pluginID + "/refresh"
 	pinRoute     = "/plugins/" + pluginID + "/pin"
+	configRoute  = "/plugins/" + pluginID + "/config"
 	resourcePath = "/status"
 )
 
@@ -167,11 +172,77 @@ type managementResource struct {
 }
 
 type managementRequest struct {
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	Body   []byte `json:"body"`
+	Method  string              `json:"method"`
+	Path    string              `json:"path"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Query   map[string][]string `json:"query,omitempty"`
+	Body    []byte              `json:"body"`
 }
 
+func getQueryParam(req managementRequest, key string) string {
+	if len(req.Query) > 0 {
+		if vals, ok := req.Query[key]; ok && len(vals) > 0 {
+			return strings.TrimSpace(vals[0])
+		}
+	}
+	if u, err := url.Parse(req.Path); err == nil {
+		if val := u.Query().Get(key); val != "" {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
+}
+
+func acceptsJSON(req managementRequest) bool {
+	if getQueryParam(req, "format") == "json" {
+		return true
+	}
+	for k, vals := range req.Headers {
+		if strings.EqualFold(k, "Accept") {
+			for _, v := range vals {
+				if strings.Contains(strings.ToLower(v), "application/json") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isHostPrivacyModeEnabled() bool {
+	candidates := []string{
+		"privacy-mode.json",
+		"../privacy-mode.json",
+	}
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil {
+			var val bool
+			if err := json.Unmarshal(data, &val); err == nil {
+				return val
+			}
+		}
+	}
+	return false
+}
+
+func updateParallelCountInConfigFile(count int) {
+	candidates := []string{
+		"config.yaml",
+		"../config.yaml",
+	}
+	for _, p := range candidates {
+		content, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		re := regexp.MustCompile(`(?m)^(\s*parallel_count:\s*)\d+`)
+		if re.Match(content) {
+			newContent := re.ReplaceAll(content, []byte(fmt.Sprintf("${1}%d", count)))
+			_ = os.WriteFile(p, newContent, 0644)
+			return
+		}
+	}
+}
 func main() {}
 
 //export cliproxy_plugin_init
@@ -400,12 +471,77 @@ func handleManagement(raw []byte) ([]byte, error) {
 	cfg := activeConfig
 	configMu.RUnlock()
 
-	if method == http.MethodGet && (strings.HasSuffix(path, "/resource/plugins/"+pluginID+resourcePath) || path == resourcePath) {
-		status := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, now)
+	if method == http.MethodGet && (strings.Contains(path, "/resource/plugins/"+pluginID+resourcePath) || strings.Contains(path, resourcePath)) {
+		action := getQueryParam(req, "action")
+		if action == "set_parallel" {
+			countStr := getQueryParam(req, "count")
+			if count, err := strconv.Atoi(countStr); err == nil && count > 0 {
+				configMu.Lock()
+				activeConfig.ParallelCount = count
+				cfgCopy := activeConfig
+				configMu.Unlock()
+				rotScheduler.Configure(cfgCopy)
+				updateParallelCountInConfigFile(count)
+				_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfgCopy, now)
+				if acceptsJSON(req) {
+					return okEnvelope(jsonResponse(http.StatusOK, map[string]any{
+						"ok":             true,
+						"parallel_count": count,
+					}))
+				}
+			}
+		} else if action == "pin" {
+			target := getQueryParam(req, "account")
+			prioStr := getQueryParam(req, "priority")
+			prio, _ := strconv.Atoi(prioStr)
+			configMu.Lock()
+			errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, true, &prio, now)
+			cfgCopy := activeConfig
+			configMu.Unlock()
+			if errPin != nil {
+				if acceptsJSON(req) {
+					return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": errPin.Error()}))
+				}
+			} else {
+				rotScheduler.Configure(cfgCopy)
+				if acceptsJSON(req) {
+					return okEnvelope(jsonResponse(http.StatusOK, map[string]any{
+						"ok":       true,
+						"account":  target,
+						"priority": prio,
+					}))
+				}
+			}
+		} else if action == "unpin" {
+			target := getQueryParam(req, "account")
+			configMu.Lock()
+			errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, false, nil, now)
+			cfgCopy := activeConfig
+			configMu.Unlock()
+			if errPin != nil {
+				if acceptsJSON(req) {
+					return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": errPin.Error()}))
+				}
+			} else {
+				rotScheduler.Configure(cfgCopy)
+				if acceptsJSON(req) {
+					return okEnvelope(jsonResponse(http.StatusOK, map[string]any{
+						"ok":      true,
+						"account": target,
+						"pinned":  false,
+					}))
+				}
+			}
+		}
+
+		configMu.RLock()
+		currentCfg := activeConfig
+		configMu.RUnlock()
+		status := management.BuildStatusResponse(currentCfg, rotScheduler, quotaCache, now)
 		return okEnvelope(pluginapi.ManagementResponse{
 			StatusCode: http.StatusOK,
 			Headers:    http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
-			Body:       management.RenderStatusPageHTML(status),
+			Body:       management.RenderStatusPageHTML(status, isHostPrivacyModeEnabled()),
 		})
 	}
 
@@ -449,6 +585,24 @@ func handleManagement(raw []byte) ([]byte, error) {
 		}
 		resp := management.BuildStatusResponse(cfg, rotScheduler, quotaCache, time.Now())
 		return okEnvelope(jsonResponse(http.StatusOK, resp))
+	}
+
+	if method == http.MethodPost && strings.HasSuffix(path, configRoute) {
+		var body struct {
+			ParallelCount *int `json:"parallel_count"`
+		}
+		if err := json.Unmarshal(req.Body, &body); err == nil && body.ParallelCount != nil && *body.ParallelCount > 0 {
+			configMu.Lock()
+			activeConfig.ParallelCount = *body.ParallelCount
+			cfgCopy := activeConfig
+			configMu.Unlock()
+			rotScheduler.Configure(cfgCopy)
+			updateParallelCountInConfigFile(*body.ParallelCount)
+			_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfgCopy, now)
+			resp := management.BuildStatusResponse(cfgCopy, rotScheduler, quotaCache, now)
+			return okEnvelope(jsonResponse(http.StatusOK, resp))
+		}
+		return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": "invalid parallel_count"}))
 	}
 
 	if method == http.MethodPost && strings.HasSuffix(path, pinRoute) {
