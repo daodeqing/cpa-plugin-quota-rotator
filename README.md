@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Go-1.26-00ADD8.svg" alt="Go Version">
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-orange.svg" alt="CPA Support">
-  <img src="https://img.shields.io/badge/Release-v1.2.1-green.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.2.3-green.svg" alt="Release">
 </p>
 
 ---

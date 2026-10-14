@@ -694,23 +694,54 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 			}
 		}
 
+		strategy := cfg.GetRoutingStrategy()
 		sortRecords := func(slice []*accountSyncRecord) {
 			sort.SliceStable(slice, func(i, j int) bool {
 				a, b := slice[i].info, slice[j].info
-				aStage1 := a.IsStageOneEligible()
-				bStage1 := b.IsStageOneEligible()
-				if aStage1 != bStage1 {
-					return aStage1
-				}
-				cdA := a.ResetCountdown(now)
-				cdB := b.ResetCountdown(now)
-				if cdA != cdB {
-					return cdA < cdB
-				}
-				if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+				switch strategy {
+				case "quota_high_first":
+					if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+						return a.WeeklyRemainingPercent > b.WeeklyRemainingPercent
+					}
+					return a.ShortWindowRemainingPercent > b.ShortWindowRemainingPercent
+				case "quota_low_first":
+					if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+						return a.WeeklyRemainingPercent < b.WeeklyRemainingPercent
+					}
+					return a.ShortWindowRemainingPercent < b.ShortWindowRemainingPercent
+				case "expiry_soon_first":
+					cdA := a.ResetCountdown(now)
+					cdB := b.ResetCountdown(now)
+					if cdA != cdB {
+						return cdA < cdB
+					}
 					return a.WeeklyRemainingPercent > b.WeeklyRemainingPercent
+				case "plan_high_first":
+					if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+						return a.WeeklyRemainingPercent > b.WeeklyRemainingPercent
+					}
+					return a.ResetCountdown(now) < b.ResetCountdown(now)
+				case "plan_low_first":
+					if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+						return a.WeeklyRemainingPercent < b.WeeklyRemainingPercent
+					}
+					return a.ResetCountdown(now) < b.ResetCountdown(now)
+				default: // "auto" or "custom"
+					aStage1 := a.IsStageOneEligible()
+					bStage1 := b.IsStageOneEligible()
+					if aStage1 != bStage1 {
+						return aStage1
+					}
+					cdA := a.ResetCountdown(now)
+					cdB := b.ResetCountdown(now)
+					if cdA != cdB {
+						return cdA < cdB
+					}
+					if a.WeeklyRemainingPercent != b.WeeklyRemainingPercent {
+						return a.WeeklyRemainingPercent > b.WeeklyRemainingPercent
+					}
+					return slice[i].entry.Name < slice[j].entry.Name
 				}
-				return slice[i].entry.Name < slice[j].entry.Name
 			})
 		}
 

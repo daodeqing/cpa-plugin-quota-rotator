@@ -195,6 +195,48 @@ func (r *Rotator) Pick(req pluginapi.SchedulerPickRequest, now time.Time) (plugi
 		}
 	}
 
+	strategy := r.cfg.GetRoutingStrategy()
+	if strategy == "quota_high_first" || strategy == "quota_low_first" || strategy == "expiry_soon_first" {
+		sort.SliceStable(active, func(i, j int) bool {
+			a, b := active[i], active[j]
+			switch strategy {
+			case "quota_high_first":
+				if a.Quota.WeeklyRemainingPercent != b.Quota.WeeklyRemainingPercent {
+					return a.Quota.WeeklyRemainingPercent > b.Quota.WeeklyRemainingPercent
+				}
+				return a.Quota.ShortWindowRemainingPercent > b.Quota.ShortWindowRemainingPercent
+			case "quota_low_first":
+				if a.Quota.WeeklyRemainingPercent != b.Quota.WeeklyRemainingPercent {
+					return a.Quota.WeeklyRemainingPercent < b.Quota.WeeklyRemainingPercent
+				}
+				return a.Quota.ShortWindowRemainingPercent < b.Quota.ShortWindowRemainingPercent
+			case "expiry_soon_first":
+				if a.Countdown != b.Countdown {
+					return a.Countdown < b.Countdown
+				}
+				return a.Quota.WeeklyRemainingPercent > b.Quota.WeeklyRemainingPercent
+			}
+			return a.Candidate.ID < b.Candidate.ID
+		})
+		parallelCount := r.cfg.GetParallelCount()
+		if parallelCount > len(active) {
+			parallelCount = len(active)
+		}
+		topCandidates := active[:parallelCount]
+		idx := r.rrIndices[routeKey]
+		if idx >= len(topCandidates) {
+			idx = 0
+		}
+		picked := topCandidates[idx]
+		r.rrIndices[routeKey] = (idx + 1) % len(topCandidates)
+		r.lastStages[routeKey] = strategy
+		r.lastPickedIDs[routeKey] = picked.Candidate.ID
+		return pluginapi.SchedulerPickResponse{
+			AuthID:  picked.Candidate.ID,
+			Handled: true,
+		}, strategy, picked.Candidate.ID
+	}
+
 	// Step 2: Check Stage 1 (100% Full Capacity)
 	var stageOneCandidates []CandidateWithQuota
 	for _, item := range active {

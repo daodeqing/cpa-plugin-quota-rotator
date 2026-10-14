@@ -18,6 +18,7 @@ type Config struct {
 	AntigravityGroup  string   `yaml:"antigravity_group" json:"antigravity_group"`
 	ParallelCount     int      `yaml:"parallel_count" json:"parallel_count"`
 	PinnedAccounts    []string `yaml:"pinned_accounts" json:"pinned_accounts"`
+	RoutingStrategy   string   `yaml:"routing_strategy" json:"routing_strategy"`
 }
 
 // DefaultConfig returns the recommended default plugin configuration.
@@ -30,6 +31,7 @@ func DefaultConfig() Config {
 		AntigravityGroup:  "gemini",
 		ParallelCount:     1,
 		PinnedAccounts:    []string{},
+		RoutingStrategy:   "auto",
 	}
 }
 
@@ -72,6 +74,26 @@ func (c *Config) ShouldHandleProvider(provider string) bool {
 		}
 	}
 	return false
+}
+
+// GetRoutingStrategy returns the configured routing strategy or default "auto".
+func (c *Config) GetRoutingStrategy() string {
+	if c == nil || c.RoutingStrategy == "" {
+		if len(c.PinnedAccounts) > 0 {
+			return "custom"
+		}
+		return "auto"
+	}
+	s := strings.ToLower(strings.TrimSpace(c.RoutingStrategy))
+	switch s {
+	case "quota_high_first", "quota_low_first", "plan_high_first", "plan_low_first", "expiry_soon_first", "custom":
+		return s
+	default:
+		if len(c.PinnedAccounts) > 0 {
+			return "custom"
+		}
+		return "auto"
+	}
 }
 
 // GetParallelCount returns the configured parallel count, clamped to >= 1.

@@ -79,7 +79,7 @@ import (
 )
 
 var (
-	version      = "1.2.2"
+	version      = "1.2.3"
 	repository   = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID     = "quota-rotator"
 	statusRoute  = "/plugins/" + pluginID + "/status"
@@ -223,6 +223,33 @@ func isHostPrivacyModeEnabled() bool {
 		}
 	}
 	return false
+}
+
+func updateRoutingStrategyInConfigFile(strategy string) {
+	candidates := []string{
+		"config.yaml",
+		"../config.yaml",
+	}
+	for _, p := range candidates {
+		content, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		re := regexp.MustCompile(`(?m)^(\s*routing_strategy:\s*).*`)
+		if re.Match(content) {
+			newContent := re.ReplaceAll(content, []byte(fmt.Sprintf("${1}%q", strategy)))
+			_ = os.WriteFile(p, newContent, 0644)
+			return
+		} else {
+			reQuota := regexp.MustCompile(`(?m)^(\s*quota-rotator:\s*)`)
+			if loc := reQuota.FindIndex(content); loc != nil {
+				insert := []byte(fmt.Sprintf("\n            routing_strategy: %q", strategy))
+				newContent := append(content[:loc[1]], append(insert, content[loc[1]:]...)...)
+				_ = os.WriteFile(p, newContent, 0644)
+				return
+			}
+		}
+	}
 }
 
 func updateParallelCountInConfigFile(count int) {
@@ -489,6 +516,21 @@ func handleManagement(raw []byte) ([]byte, error) {
 						"parallel_count": count,
 					}))
 				}
+			}
+		} else if action == "set_strategy" {
+			strat := strings.ToLower(strings.TrimSpace(getQueryParam(req, "strategy")))
+			configMu.Lock()
+			activeConfig.RoutingStrategy = strat
+			cfgCopy := activeConfig
+			configMu.Unlock()
+			rotScheduler.Configure(cfgCopy)
+			updateRoutingStrategyInConfigFile(strat)
+			_, _ = quota.SyncPrioritiesToHost(nativeHostCaller{}, quotaCache, cfgCopy, now)
+			if acceptsJSON(req) {
+				return okEnvelope(jsonResponse(http.StatusOK, map[string]any{
+					"ok":               true,
+					"routing_strategy": strat,
+				}))
 			}
 		} else if action == "pin" {
 			target := getQueryParam(req, "account")
