@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Go-1.26-00ADD8.svg" alt="Go Version">
   <img src="https://img.shields.io/badge/CLIProxyAPI-v8+-orange.svg" alt="CPA Support">
-  <img src="https://img.shields.io/badge/Release-v1.2.3-green.svg" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v1.2.4-green.svg" alt="Release">
 </p>
 
 ---
@@ -243,3 +243,7 @@ python tests/test_simulation.py
 ## 许可证 (License)
 
 本项目采用 [MIT License](LICENSE) 许可证开源。
+
+## v1.2.4：反重力配额兼容修复
+
+使用当前 Antigravity Hub 客户端标识，并每 6 小时检查 Google 官方更新清单。若更新清单不可用，保留已知版本或使用 2.23.0，5 分钟后重试。HTTP 200 但缺少所选模型组时继续端点回退；查询失败的账号仍在看板显示，未知配额显示为“—”，历史快照标记为上次数据，保留原有优先级。

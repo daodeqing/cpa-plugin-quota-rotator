@@ -238,12 +238,13 @@ func fetchAntigravity(storage credentialStorage, caller HostCaller, now time.Tim
 		projectID = strings.TrimSpace(storage.AntigravityCapabilityHints.ProjectID)
 	}
 
+	userAgent := antigravityUserAgent(caller, now)
 	base := strings.TrimRight(strings.TrimSpace(storage.AntigravityCapabilityHints.Endpoint), "/")
 	endpoints := []string{
 		base + "/v1internal:retrieveUserQuotaSummary",
 		"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-		"https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
 		"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+		"https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
 	}
 
 	attemptFetch := func(token string) ([]byte, int, error) {
@@ -273,7 +274,7 @@ func fetchAntigravity(storage credentialStorage, caller HostCaller, now time.Tim
 					"Authorization": {"Bearer " + token},
 					"Content-Type":  {"application/json"},
 					"Accept":        {"application/json"},
-					"User-Agent":    {"Antigravity/1.0.0"},
+					"User-Agent":    {userAgent},
 				},
 				Body: encoded,
 			})
@@ -289,9 +290,11 @@ func fetchAntigravity(storage credentialStorage, caller HostCaller, now time.Tim
 				lastErr = fmt.Errorf("quota endpoint returned HTTP %d", response.StatusCode)
 				continue
 			}
-			if len(response.Body) > 0 {
+			// HTTP 200 也可能缺少当前模型组，必须校验内容后再结束端点回退。
+			if _, _, _, _, ok := ParseAntigravityQuotaDetailsJSON(response.Body, group, now); ok {
 				return response.Body, response.StatusCode, nil
 			}
+			lastErr = fmt.Errorf("antigravity quota response has no matching buckets")
 		}
 		if lastErr == nil {
 			lastErr = fmt.Errorf("quota endpoint returned an empty response")
@@ -508,21 +511,58 @@ func RefreshAllFromHostWithConfig(caller HostCaller, cache *Cache, cfg config.Co
 		}
 		body, err := caller.Call(pluginabi.MethodHostAuthGet, mustJSON(pluginapi.HostAuthGetRequest{AuthIndex: entry.AuthIndex}))
 		if err != nil {
+			recordQuotaFetchError(cache, entry, provider, err)
 			continue
 		}
 		var getEnvelope hostEnvelope
 		var credential hostAuthGetResponse
 		if json.Unmarshal(body, &getEnvelope) != nil || !getEnvelope.OK || json.Unmarshal(getEnvelope.Result, &credential) != nil {
+			recordQuotaFetchError(cache, entry, provider, fmt.Errorf("credential could not be read"))
 			continue
 		}
 		_, info, err := FetchCredentialQuota(provider, credential.JSON, caller, now, cfg.AntigravityGroup)
 		if err != nil || info == nil {
+			recordQuotaFetchError(cache, entry, provider, err)
 			continue
 		}
 		StoreAccountQuotaInCache(cache, entry, info)
 	}
 	if cfg.Enabled {
 		_, _ = SyncPrioritiesToHost(caller, cache, cfg, now)
+	}
+}
+
+func recordQuotaFetchError(cache *Cache, entry pluginapi.HostAuthFileEntry, provider string, err error) {
+	info := &AccountQuotaInfo{Provider: provider}
+	for _, id := range []string{entry.ID, entry.Name, entry.AuthIndex} {
+		if previous, ok := cache.Get(id); ok {
+			info = previous
+			break
+		}
+	}
+	info.QuotaError = quotaFetchErrorMessage(err)
+	StoreAccountQuotaInCache(cache, entry, info)
+}
+
+// 错误只显示可控的状态摘要，避免把上游响应中的凭证或个人信息带进公开资源页。
+func quotaFetchErrorMessage(err error) string {
+	if err == nil {
+		return "配额查询失败，请稍后刷新"
+	}
+	detail := err.Error()
+	switch {
+	case strings.Contains(detail, "HTTP 401"):
+		return "访问凭证失效 (HTTP 401)，请重新登录"
+	case strings.Contains(detail, "HTTP 403"):
+		return "配额接口拒绝访问 (HTTP 403)"
+	case strings.Contains(detail, "HTTP 429"):
+		return "配额接口请求过于频繁 (HTTP 429)"
+	case strings.Contains(detail, "no matching"):
+		return "接口未返回所选模型组的配额"
+	case strings.Contains(detail, "token is missing"):
+		return "缺少访问凭证，请重新登录"
+	default:
+		return "配额查询失败，请稍后刷新"
 	}
 }
 
@@ -545,7 +585,7 @@ func StoreAccountQuotaInCache(cache *Cache, entry pluginapi.HostAuthFileEntry, i
 		info.Email = strings.TrimSpace(entry.Email)
 	}
 	info.Disabled = entry.Disabled
-	info.IsHealthy = !entry.Unavailable
+	info.IsHealthy = !entry.Unavailable && info.QuotaError == ""
 	cache.Set(info)
 	if entry.AuthIndex != "" && entry.AuthIndex != primaryID {
 		copyInfo := *info
@@ -555,15 +595,15 @@ func StoreAccountQuotaInCache(cache *Cache, entry pluginapi.HostAuthFileEntry, i
 }
 
 type accountSyncRecord struct {
-	entry        pluginapi.HostAuthFileEntry
-	credential   hostAuthGetResponse
-	doc          map[string]any
-	hasDoc       bool
-	docPriority  int
-	info         *AccountQuotaInfo
-	isPinned     bool
-	pinnedPrio   *int
-	targetPrio   int
+	entry       pluginapi.HostAuthFileEntry
+	credential  hostAuthGetResponse
+	doc         map[string]any
+	hasDoc      bool
+	docPriority int
+	info        *AccountQuotaInfo
+	isPinned    bool
+	pinnedPrio  *int
+	targetPrio  int
 }
 
 // SyncPrioritiesToHost recalculates priorities for all managed credentials per provider
@@ -678,8 +718,8 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 				}
 				continue
 			}
-			if rec.info == nil {
-				// No quota info yet; preserve current priority
+			if rec.info == nil || rec.info.QuotaError != "" {
+				// 查询失败或尚无配额时保留优先级，不把未知配额伪装为已耗尽。
 				rec.targetPrio = rec.docPriority
 				continue
 			}

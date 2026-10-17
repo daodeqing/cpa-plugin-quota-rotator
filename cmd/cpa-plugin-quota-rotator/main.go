@@ -79,7 +79,7 @@ import (
 )
 
 var (
-	version      = "1.2.3"
+	version      = "1.2.4"
 	repository   = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID     = "quota-rotator"
 	statusRoute  = "/plugins/" + pluginID + "/status"
@@ -498,7 +498,7 @@ func handleManagement(raw []byte) ([]byte, error) {
 	cfg := activeConfig
 	configMu.RUnlock()
 
-	if method == http.MethodGet && (strings.Contains(path, "/resource/plugins/"+pluginID+resourcePath) || strings.Contains(path, resourcePath)) {
+	if method == http.MethodGet && (strings.Contains(path, "/resource/plugins/"+pluginID+resourcePath) || path == resourcePath) {
 		action := getQueryParam(req, "action")
 		if action == "set_parallel" {
 			countStr := getQueryParam(req, "count")

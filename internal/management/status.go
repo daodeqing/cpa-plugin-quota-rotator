@@ -32,6 +32,8 @@ type AccountView struct {
 	PinnedPriority              *int    `json:"pinned_priority,omitempty"`
 	ComputedPriority            int     `json:"computed_priority"`
 	EligibleStage               string  `json:"eligible_stage"`
+	QuotaError                  string  `json:"quota_error,omitempty"`
+	QuotaStale                  bool    `json:"quota_stale,omitempty"`
 }
 
 type StatusResponse struct {
@@ -167,6 +169,8 @@ func BuildStatusResponse(cfg config.Config, rot *scheduler.Rotator, cache *quota
 			PinnedPriority:              acc.PinnedPriority,
 			ComputedPriority:            acc.ComputedPriority,
 			EligibleStage:               stage,
+			QuotaError:                  acc.QuotaError,
+			QuotaStale:                  acc.QuotaError != "" && !acc.ObservedAt.IsZero(),
 		})
 	}
 
@@ -250,7 +254,6 @@ func RenderStatusPageHTML(status StatusResponse, defaultPrivacy bool) []byte {
 		}
 	}
 	strategyLabel := strategyDisplayLabel(currentStrategy)
-
 
 	var buf bytes.Buffer
 	buf.WriteString(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -461,7 +464,7 @@ code {
 <div class="card">
   <div class="header-row">
     <div>
-      <h1><span>⚡</span> 智能配额轮换调度器 (Smart Quota Rotator v1.2.3)</h1>
+      <h1><span>⚡</span> 智能配额轮换调度器 (Smart Quota Rotator v1.2.4)</h1>
       <div class="desc">两阶段自动轮换：满额 (100%) 优先轮询；全员 ≤99% 时按周限刷新倒计时最短优先消耗；支持多号并行防打爆与固定指定账号优先级。</div>
     </div>
     <div class="header-actions">
@@ -475,7 +478,6 @@ code {
           <span class="caret-icon">▲</span>
         </button>
         <div class="strategy-menu" id="strategyMenu">`)
-
 
 	strategyOptions := []struct {
 		Val   string
@@ -593,8 +595,26 @@ code {
 		stateText := `<span class="badge ok">可用</span>`
 		if acc.Disabled {
 			stateText = `<span class="badge warn">已停用</span>`
+		} else if acc.QuotaError != "" {
+			label := "查询失败"
+			if acc.QuotaStale {
+				label = "刷新失败 · 上次数据"
+			}
+			stateText = fmt.Sprintf(`<span class="badge warn" title="%s">%s</span>`, html.EscapeString(acc.QuotaError), label)
+		} else if !acc.IsHealthy {
+			stateText = `<span class="badge warn">暂不可用</span>`
 		} else if acc.IsBypassed {
 			stateText = `<span class="badge warn">0% 避让中</span>`
+		}
+
+		weeklyText := fmt.Sprintf("%.1f%%", acc.WeeklyRemainingPercent)
+		shortText := fmt.Sprintf("%.1f%%", acc.ShortWindowRemainingPercent)
+		resetText := "—"
+		if acc.WeeklyResetAt != "" {
+			resetText = formatCountdownHuman(acc.WeeklyResetCountdownSeconds)
+		}
+		if acc.QuotaError != "" && !acc.QuotaStale {
+			weeklyText, shortText, resetText = "—", "—", "—"
 		}
 
 		// Options for priority selector
@@ -631,9 +651,9 @@ code {
   <td><span class="account-label" data-raw="%s" data-masked="%s">%s</span></td>
   <td>%s</td>
   <td><select class="%s" data-account="%s" onchange="onPriorityChange(this)">%s</select></td>
-  <td><strong>%.1f%%</strong></td>
+  <td><strong>%s</strong></td>
   <td>%s</td>
-  <td>%.1f%%</td>
+  <td>%s</td>
   <td>%s</td>
 </tr>`,
 			html.EscapeString(acc.Provider),
@@ -644,9 +664,9 @@ code {
 			selectClass,
 			html.EscapeString(targetAccount),
 			optBuf.String(),
-			acc.WeeklyRemainingPercent,
-			html.EscapeString(formatCountdownHuman(acc.WeeklyResetCountdownSeconds)),
-			acc.ShortWindowRemainingPercent,
+			weeklyText,
+			html.EscapeString(resetText),
+			shortText,
 			stateText,
 		))
 	}

@@ -11,7 +11,7 @@ type AccountQuotaInfo struct {
 	FileName                    string    `json:"file_name,omitempty"`
 	Email                       string    `json:"email,omitempty"`
 	Provider                    string    `json:"provider"`
-	WeeklyRemainingPercent      float64   `json:"weekly_remaining_percent"`       // 0.0 to 100.0
+	WeeklyRemainingPercent      float64   `json:"weekly_remaining_percent"` // 0.0 to 100.0
 	WeeklyResetAt               time.Time `json:"weekly_reset_at"`
 	ShortWindowRemainingPercent float64   `json:"short_window_remaining_percent"` // 5h window (0.0 to 100.0)
 	ShortWindowResetAt          time.Time `json:"short_window_reset_at"`
@@ -21,6 +21,7 @@ type AccountQuotaInfo struct {
 	PinnedPriority              *int      `json:"pinned_priority,omitempty"`
 	ComputedPriority            int       `json:"computed_priority"`
 	StatusMessage               string    `json:"status_message,omitempty"`
+	QuotaError                  string    `json:"quota_error,omitempty"`
 	ObservedAt                  time.Time `json:"observed_at"`
 }
 
@@ -50,7 +51,7 @@ func (a *AccountQuotaInfo) IsBypassed(strictShortWindow bool) bool {
 	if a == nil {
 		return true
 	}
-	if !a.IsHealthy {
+	if !a.IsHealthy || a.QuotaError != "" {
 		return true
 	}
 	// Weekly quota completely exhausted (0%)
