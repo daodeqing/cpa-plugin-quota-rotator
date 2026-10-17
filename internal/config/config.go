@@ -123,42 +123,50 @@ func ParsePinnedSpec(spec string) (pattern string, fixedPriority *int) {
 	return strings.ToLower(s), nil
 }
 
-// MatchPinnedAccount checks if any of the given account identifiers (ID, filename, email, auth_index)
-// matches a configured pinned_accounts entry.
-func (c *Config) MatchPinnedAccount(identifiers ...string) (pinned bool, fixedPriority *int) {
-	if c == nil || len(c.PinnedAccounts) == 0 {
+// ScopedPinnedKey 将固定规则绑定供应商和稳定凭证 ID，邮箱只作为展示信息。
+func ScopedPinnedKey(provider, identifier string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + "|" + strings.ToLower(strings.TrimSpace(identifier))
+}
+
+// MatchPinnedAccountForProvider 解析带供应商的规则；裸邮箱需先由完整凭证列表消歧。
+func (c *Config) MatchPinnedAccountForProvider(provider string, identifiers ...string) (bool, *int) {
+	if c == nil {
 		return false, nil
 	}
-	normIDs := make([]string, 0, len(identifiers)*2)
-	for _, raw := range identifiers {
-		v := strings.ToLower(strings.TrimSpace(raw))
-		if v == "" {
-			continue
-		}
-		normIDs = append(normIDs, v)
-		base := filepath.Base(v)
-		if base != v {
-			normIDs = append(normIDs, base)
-		}
-		trimmed := strings.TrimSuffix(base, ".json")
-		if trimmed != base {
-			normIDs = append(normIDs, trimmed)
-		}
-	}
-	if len(normIDs) == 0 {
-		return false, nil
-	}
-	for _, rawSpec := range c.PinnedAccounts {
-		pat, prio := ParsePinnedSpec(rawSpec)
-		if pat == "" {
-			continue
-		}
-		patBase := strings.TrimSuffix(filepath.Base(pat), ".json")
-		for _, id := range normIDs {
-			if id == pat || id == patBase || (strings.Contains(pat, "@") && strings.Contains(id, pat)) {
-				return true, prio
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	for _, spec := range c.PinnedAccounts {
+		pattern, priority := ParsePinnedSpec(spec)
+		if scopedProvider, id, scoped := strings.Cut(pattern, "|"); scoped {
+			if scopedProvider != provider {
+				continue
 			}
+			pattern = id
+		}
+		if strings.Contains(pattern, "@") && !strings.HasSuffix(pattern, ".json") {
+			// 调度阶段没有完整凭证清单，带供应商的邮箱也不能代表唯一凭证。
+			continue
+		}
+		if matchesPinnedIdentifier(pattern, identifiers...) {
+			return true, priority
 		}
 	}
 	return false, nil
+}
+
+func matchesPinnedIdentifier(pattern string, identifiers ...string) bool {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	if pattern == "" {
+		return false
+	}
+	stem := strings.TrimSuffix(filepath.Base(pattern), ".json")
+	for _, id := range identifiers {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		if id == pattern || strings.TrimSuffix(filepath.Base(id), ".json") == stem {
+			return true
+		}
+	}
+	return false
 }

@@ -112,7 +112,7 @@ func (r *Rotator) Pick(req pluginapi.SchedulerPickRequest, now time.Time) (plugi
 			continue
 		}
 
-		isPinned, fixedPrio := r.resolveCandidatePin(cand, q)
+		isPinned, fixedPrio := r.resolveCandidatePin(provider, cand, q)
 		autoPrio := q.ComputedPriority
 		if autoPrio <= 0 {
 			autoPrio = cand.Priority
@@ -295,7 +295,7 @@ func (r *Rotator) Pick(req pluginapi.SchedulerPickRequest, now time.Time) (plugi
 	}, StageResetSoon, picked.Candidate.ID
 }
 
-func (r *Rotator) resolveCandidatePin(cand pluginapi.SchedulerAuthCandidate, q *quota.AccountQuotaInfo) (bool, int) {
+func (r *Rotator) resolveCandidatePin(provider string, cand pluginapi.SchedulerAuthCandidate, q *quota.AccountQuotaInfo) (bool, int) {
 	email := ""
 	name := ""
 	if cand.Attributes != nil {
@@ -323,7 +323,7 @@ func (r *Rotator) resolveCandidatePin(cand pluginapi.SchedulerAuthCandidate, q *
 			name = q.FileName
 		}
 	}
-	if pinned, fixed := r.cfg.MatchPinnedAccount(cand.ID, email, name); pinned {
+	if pinned, fixed := r.cfg.MatchPinnedAccountForProvider(provider, cand.ID, email, name); pinned {
 		if fixed != nil {
 			return true, *fixed
 		}

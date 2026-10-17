@@ -3,7 +3,7 @@
   "name": "智能配额轮换 (Quota Priority Rotator)",
   "description": "1. 满额轮询：账号 100% 满额时均匀分摊，避免单号过早耗尽；2. 临期优先：全员 ≤99% 时优先使用刷新倒计时最短的账号，榨干即将重置的额度；3. 智能避让与锁定：0% 耗尽自动跳过，支持多号并行与手动固定优先级。 / 1. Full-capacity round-robin for 100% accounts; 2. Reset-soon first for ≤99% accounts to drain expiring quota; 3. Smart bypass on 0% and pinned account priority support.",
   "author": "daodeqing",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "repository": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "homepage": "https://github.com/daodeqing/cpa-plugin-quota-rotator",
   "license": "MIT",

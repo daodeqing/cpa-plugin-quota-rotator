@@ -615,7 +615,11 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 	}
 	syncMu.Lock()
 	defer syncMu.Unlock()
+	return syncPrioritiesToHost(caller, cache, cfg, now)
+}
 
+// 调用方已持有同步锁，避免后台同步用旧文档覆盖刚刚保存的固定标记。
+func syncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, now time.Time) (int, error) {
 	raw, err := caller.Call(pluginabi.MethodHostAuthList, []byte(`{}`))
 	if err != nil {
 		return 0, err
@@ -629,6 +633,7 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 		return 0, err
 	}
 
+	cfg.PinnedAccounts = resolveLegacyPinnedAccounts(cfg.PinnedAccounts, listing.Files)
 	byProvider := make(map[string][]*accountSyncRecord)
 	for _, entry := range listing.Files {
 		if entry.RuntimeOnly {
@@ -678,7 +683,7 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 		}
 
 		// Determine if this account is pinned via config or credential metadata
-		pinned, fixedPrio := cfg.MatchPinnedAccount(entry.ID, entry.Name, entry.Email, entry.Account, entry.AuthIndex)
+		pinned, fixedPrio := cfg.MatchPinnedAccountForProvider(provider, entry.ID, entry.Name, entry.Email, entry.Account, entry.AuthIndex)
 		if !pinned && rec.hasDoc {
 			if b, ok := toBool(rec.doc["priority_pinned"]); ok && b {
 				pinned = true
@@ -875,74 +880,55 @@ func SyncPrioritiesToHost(caller HostCaller, cache *Cache, cfg config.Config, no
 	return updatedCount, nil
 }
 
-// SetAccountPinnedInHost pins or unpins a specific account in both its credential JSON
-// and the active plugin configuration, then triggers a priority sync.
+// SetAccountPinnedInHost 兼容旧 API，但相同邮箱对应多个凭证时拒绝写入。
 func SetAccountPinnedInHost(caller HostCaller, cache *Cache, cfg *config.Config, accountOrIndex string, pinned bool, priority *int, now time.Time) error {
-	if caller == nil || cfg == nil {
+	return SetAccountPinnedForProviderInHost(caller, cache, cfg, "", accountOrIndex, pinned, priority, now)
+}
+
+// SetAccountPinnedForProviderInHost 只修改请求选中的供应商凭证。
+func SetAccountPinnedForProviderInHost(caller HostCaller, cache *Cache, cfg *config.Config, provider, target string, pinned bool, priority *int, now time.Time) error {
+	syncMu.Lock()
+	defer syncMu.Unlock()
+	if caller == nil || cfg == nil || cache == nil {
 		return fmt.Errorf("host caller or config unavailable")
 	}
-	target := strings.TrimSpace(accountOrIndex)
-	if target == "" {
-		return fmt.Errorf("account identifier is required")
-	}
-
-	raw, err := caller.Call(pluginabi.MethodHostAuthList, []byte(`{}`))
+	raw, err := caller.Call(pluginabi.MethodHostAuthList, []byte("{}"))
 	if err != nil {
 		return err
 	}
-	var envelope hostEnvelope
-	if err := json.Unmarshal(raw, &envelope); err != nil || !envelope.OK {
+	var env hostEnvelope
+	var listing hostAuthListResponse
+	if json.Unmarshal(raw, &env) != nil || !env.OK || json.Unmarshal(env.Result, &listing) != nil {
 		return fmt.Errorf("host.auth.list failed")
 	}
-	var listing hostAuthListResponse
-	if err := json.Unmarshal(envelope.Result, &listing); err != nil {
+	matched, err := resolvePinnedCredential(listing.Files, provider, target)
+	if err != nil {
 		return err
 	}
-
-	var matched *pluginapi.HostAuthFileEntry
-	targetLower := strings.ToLower(target)
-	targetBase := strings.TrimSuffix(filepath.Base(targetLower), ".json")
-	for i := range listing.Files {
-		entry := &listing.Files[i]
-		for _, candidate := range []string{entry.AuthIndex, entry.ID, entry.Name, entry.Email, entry.Account} {
-			cLower := strings.ToLower(strings.TrimSpace(candidate))
-			if cLower == "" {
-				continue
-			}
-			cBase := strings.TrimSuffix(filepath.Base(cLower), ".json")
-			if cLower == targetLower || cBase == targetBase {
-				matched = entry
-				break
-			}
-		}
-		if matched != nil {
-			break
-		}
-	}
-	if matched == nil {
-		return fmt.Errorf("credential %q not found", target)
-	}
-
 	body, err := caller.Call(pluginabi.MethodHostAuthGet, mustJSON(pluginapi.HostAuthGetRequest{AuthIndex: matched.AuthIndex}))
 	if err != nil {
 		return err
 	}
-	var getEnv hostEnvelope
 	var cred hostAuthGetResponse
-	if err := json.Unmarshal(body, &getEnv); err != nil || !getEnv.OK || json.Unmarshal(getEnv.Result, &cred) != nil {
-		return fmt.Errorf("host.auth.get failed for %s", matched.Name)
+	if json.Unmarshal(body, &env) != nil || !env.OK || json.Unmarshal(env.Result, &cred) != nil {
+		return fmt.Errorf("host.auth.get failed")
 	}
 	var doc map[string]any
-	if err := json.Unmarshal(cred.JSON, &doc); err != nil || doc == nil {
-		return fmt.Errorf("invalid credential JSON for %s", matched.Name)
+	if json.Unmarshal(cred.JSON, &doc) != nil || doc == nil {
+		return fmt.Errorf("invalid credential JSON")
 	}
 
 	if pinned {
-		doc["priority_pinned"] = true
-		if priority != nil {
-			doc["priority"] = *priority
-			doc["pinned_priority_value"] = *priority
+		value := matched.Priority
+		if existing, ok := parseDocInt(doc["priority"]); ok {
+			value = existing
 		}
+		if priority != nil {
+			value = *priority
+		}
+		doc["priority_pinned"] = true
+		doc["priority"] = value
+		doc["pinned_priority_value"] = value
 	} else {
 		delete(doc, "priority_pinned")
 		delete(doc, "pinned_priority")
@@ -951,46 +937,40 @@ func SetAccountPinnedInHost(caller HostCaller, cache *Cache, cfg *config.Config,
 			doc["priority"] = *priority
 		}
 	}
-
-	saveName := filepath.Base(strings.TrimSpace(cred.Name))
+	saveName := strings.TrimSpace(cred.Name)
 	if saveName == "" {
-		saveName = filepath.Base(strings.TrimSpace(matched.Name))
+		saveName = strings.TrimSpace(matched.Name)
 	}
-	updatedBytes, err := json.Marshal(doc)
+	saveName = filepath.Base(saveName)
+	if !strings.HasSuffix(strings.ToLower(saveName), ".json") {
+		return fmt.Errorf("credential file name is invalid")
+	}
+	result, err := caller.Call(pluginabi.MethodHostAuthSave, mustJSON(pluginapi.HostAuthSaveRequest{Name: saveName, JSON: mustJSON(doc)}))
 	if err != nil {
 		return err
 	}
-	if _, err := caller.Call(pluginabi.MethodHostAuthSave, mustJSON(pluginapi.HostAuthSaveRequest{
-		Name: saveName,
-		JSON: updatedBytes,
-	})); err != nil {
-		return err
+	if json.Unmarshal(result, &env) != nil || !env.OK {
+		return fmt.Errorf("host.auth.save failed")
 	}
 
-	// Update in-memory PinnedAccounts slice cleanly
 	var nextPinned []string
-	tempCfg := config.Config{PinnedAccounts: []string{}}
-	for _, spec := range cfg.PinnedAccounts {
-		tempCfg.PinnedAccounts = []string{spec}
-		if isMatch, _ := tempCfg.MatchPinnedAccount(matched.ID, matched.Name, matched.Email, matched.Account, matched.AuthIndex); !isMatch {
+	for _, spec := range resolveLegacyPinnedAccounts(cfg.PinnedAccounts, listing.Files) {
+		specCfg := config.Config{PinnedAccounts: []string{spec}}
+		match, _ := specCfg.MatchPinnedAccountForProvider(credentialProvider(*matched), matched.ID, matched.Name, matched.AuthIndex, matched.Email, matched.Account)
+		if !match {
 			nextPinned = append(nextPinned, spec)
 		}
 	}
 	if pinned {
-		key := matched.Email
-		if strings.TrimSpace(key) == "" {
-			key = matched.Name
-		}
-		if priority != nil {
-			nextPinned = append(nextPinned, fmt.Sprintf("%s=%d", key, *priority))
-		} else {
-			nextPinned = append(nextPinned, key)
-		}
+		key := credentialPinKey(*matched)
+		value, _ := parseDocInt(doc["priority"])
+		nextPinned = append(nextPinned, fmt.Sprintf("%s=%d", key, value))
 	}
 	cfg.PinnedAccounts = nextPinned
-
-	_, _ = SyncPrioritiesToHost(caller, cache, *cfg, now)
-	return nil
+	if cfg.Enabled {
+		_, err = syncPrioritiesToHost(caller, cache, *cfg, now)
+	}
+	return err
 }
 
 func parseDocInt(raw any) (int, bool) {

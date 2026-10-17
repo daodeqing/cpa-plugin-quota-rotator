@@ -1,9 +1,9 @@
-# Smart Quota Rotator v1.2.4
+# Smart Quota Rotator v1.2.5
 
-- 修复反重力账号消失：使用当前 Antigravity Hub 请求标识，并从 Google 官方更新清单缓存最新版本。旧的 1.0.0 标识可能使配额接口省略 Gemini 模型组。
-- 配额端点返回 HTTP 200 但没有所选模型组时，继续尝试下一个端点。
-- 查询失败的账号保留在看板中，显示失败状态；首次查询失败显示未知值，历史数据明确标记，查询失败不改写原有账号优先级。
-- 修复状态 JSON 接口被 HTML 资源路由遮蔽的问题。
-- 将构建与发布流程放入 .github，生成 Windows、Linux 和 macOS 共五个平台的安装包及 SHA-256 校验清单。
+- 修复同一邮箱跨供应商误固定：下拉框提交供应商和唯一凭证 ID；固定规则保存为供应商与凭证 ID 的组合。
+- 固定和取消固定均只影响选中的凭证。同供应商下同邮箱的个人版、团队版凭证也独立处理。
+- 旧客户端若只提交有歧义的邮箱，直接拒绝写入，避免选中列表里的第一个账号。
+- 旧配置中的邮箱规则只在完整凭证列表里能唯一匹配时转换；存在歧义时不再扩散。凭证自身已保存的固定标记保持独立。
+- 修复资源页保存失败却显示成功的问题。保留 v1.2.4 的 Antigravity Hub 配额兼容修复。
 
-The Google quota endpoint is still available. This release fixes the client identity and the silent omission of accounts when the selected model group's quota is absent. Existing scheduling strategies and fixed account priorities are preserved.
+Pins and unpins are now bound to a provider and one credential. Existing rotation and parallel-count behavior is unchanged.

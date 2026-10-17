@@ -464,7 +464,7 @@ code {
 <div class="card">
   <div class="header-row">
     <div>
-      <h1><span>⚡</span> 智能配额轮换调度器 (Smart Quota Rotator v1.2.4)</h1>
+      <h1><span>⚡</span> 智能配额轮换调度器 (Smart Quota Rotator v1.2.5)</h1>
       <div class="desc">两阶段自动轮换：满额 (100%) 优先轮询；全员 ≤99% 时按周限刷新倒计时最短优先消耗；支持多号并行防打爆与固定指定账号优先级。</div>
     </div>
     <div class="header-actions">
@@ -638,19 +638,19 @@ code {
 			optBuf.WriteString(fmt.Sprintf(`<option value="%d"%s>📌 固定优先级: %s</option>`, p, sel, label))
 		}
 
-		targetAccount := acc.Email
-		if targetAccount == "" {
-			targetAccount = acc.FileName
-		}
+		targetAccount := acc.AuthIndex
 		if targetAccount == "" {
 			targetAccount = acc.AuthID
+		}
+		if targetAccount == "" {
+			targetAccount = acc.FileName
 		}
 
 		buf.WriteString(fmt.Sprintf(`<tr>
   <td><code>%s</code></td>
   <td><span class="account-label" data-raw="%s" data-masked="%s">%s</span></td>
   <td>%s</td>
-  <td><select class="%s" data-account="%s" onchange="onPriorityChange(this)">%s</select></td>
+  <td><select class="%s" data-account="%s" data-provider="%s" onchange="onPriorityChange(this)">%s</select></td>
   <td><strong>%s</strong></td>
   <td>%s</td>
   <td>%s</td>
@@ -663,6 +663,7 @@ code {
 			priorityTag,
 			selectClass,
 			html.EscapeString(targetAccount),
+			html.EscapeString(acc.Provider),
 			optBuf.String(),
 			weeklyText,
 			html.EscapeString(resetText),
@@ -781,6 +782,7 @@ function onParallelChange(val) {
 
 function onPriorityChange(sel) {
   const account = sel.getAttribute('data-account');
+  const provider = sel.getAttribute('data-provider');
   const val = sel.value;
   showToast('正在保存账号优先级...');
   let url = window.location.pathname + '?format=json';
@@ -789,8 +791,9 @@ function onPriorityChange(sel) {
   } else {
     url += '&action=pin&account=' + encodeURIComponent(account) + '&priority=' + encodeURIComponent(val);
   }
+  url += '&provider=' + encodeURIComponent(provider);
   fetch(url)
-    .then(r => r.json())
+    .then(async r => { const data = await r.json(); if (!r.ok || data.error) throw new Error(data.error || '保存失败'); return data; })
     .then(data => {
       showToast(val === 'auto' ? '账号已恢复自动轮换！' : '账号已成功固定优先级为 ' + val + '！', 'success');
       setTimeout(() => location.reload(), 500);

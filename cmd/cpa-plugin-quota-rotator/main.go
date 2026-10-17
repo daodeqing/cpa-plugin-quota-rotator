@@ -79,7 +79,7 @@ import (
 )
 
 var (
-	version      = "1.2.4"
+	version      = "1.2.5"
 	repository   = "https://github.com/daodeqing/cpa-plugin-quota-rotator"
 	pluginID     = "quota-rotator"
 	statusRoute  = "/plugins/" + pluginID + "/status"
@@ -479,6 +479,7 @@ type refreshManagementPayload struct {
 }
 
 type pinManagementPayload struct {
+	Provider  string `json:"provider,omitempty"`
 	Account   string `json:"account"`
 	AuthIndex string `json:"auth_index"`
 	Pinned    bool   `json:"pinned"`
@@ -537,7 +538,7 @@ func handleManagement(raw []byte) ([]byte, error) {
 			prioStr := getQueryParam(req, "priority")
 			prio, _ := strconv.Atoi(prioStr)
 			configMu.Lock()
-			errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, true, &prio, now)
+			errPin := quota.SetAccountPinnedForProviderInHost(nativeHostCaller{}, quotaCache, &activeConfig, getQueryParam(req, "provider"), target, true, &prio, now)
 			cfgCopy := activeConfig
 			configMu.Unlock()
 			if errPin != nil {
@@ -557,7 +558,7 @@ func handleManagement(raw []byte) ([]byte, error) {
 		} else if action == "unpin" {
 			target := getQueryParam(req, "account")
 			configMu.Lock()
-			errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, false, nil, now)
+			errPin := quota.SetAccountPinnedForProviderInHost(nativeHostCaller{}, quotaCache, &activeConfig, getQueryParam(req, "provider"), target, false, nil, now)
 			cfgCopy := activeConfig
 			configMu.Unlock()
 			if errPin != nil {
@@ -652,12 +653,12 @@ func handleManagement(raw []byte) ([]byte, error) {
 		if err := json.Unmarshal(req.Body, &body); err != nil {
 			return okEnvelope(jsonResponse(http.StatusBadRequest, map[string]string{"error": "invalid request body"}))
 		}
-		target := strings.TrimSpace(body.Account)
+		target := strings.TrimSpace(body.AuthIndex)
 		if target == "" {
-			target = strings.TrimSpace(body.AuthIndex)
+			target = strings.TrimSpace(body.Account)
 		}
 		configMu.Lock()
-		errPin := quota.SetAccountPinnedInHost(nativeHostCaller{}, quotaCache, &activeConfig, target, body.Pinned, body.Priority, now)
+		errPin := quota.SetAccountPinnedForProviderInHost(nativeHostCaller{}, quotaCache, &activeConfig, body.Provider, target, body.Pinned, body.Priority, now)
 		updatedCfg := activeConfig
 		configMu.Unlock()
 		if errPin != nil {

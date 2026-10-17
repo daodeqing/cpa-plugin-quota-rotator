@@ -38,3 +38,25 @@ func TestFailedQuotaMarksLastSuccessfulSnapshot(t *testing.T) {
 		t.Fatal("stale snapshot not labelled")
 	}
 }
+
+func TestPinControlsUseProviderAndUniqueCredentialInsteadOfEmail(t *testing.T) {
+	status := StatusResponse{Accounts: []AccountView{
+		{Provider: "antigravity", Email: "shared@example.com", AuthID: "ag-file.json", AuthIndex: "ag-index", RawLabel: "shared@example.com", MaskedLabel: "s***@e***.com"},
+		{Provider: "codex", Email: "shared@example.com", AuthID: "codex-file.json", AuthIndex: "codex-index", RawLabel: "shared@example.com", MaskedLabel: "s***@e***.com"},
+	}}
+	page := string(RenderStatusPageHTML(status, true))
+	for _, attributes := range []string{
+		`data-account="ag-index" data-provider="antigravity"`,
+		`data-account="codex-index" data-provider="codex"`,
+	} {
+		if !strings.Contains(page, attributes) {
+			t.Fatalf("missing isolated control: %s", attributes)
+		}
+	}
+	if strings.Contains(page, `data-account="shared@example.com"`) {
+		t.Fatal("control still submits an ambiguous email")
+	}
+	if !strings.Contains(page, "!r.ok || data.error") {
+		t.Fatal("failed save still reported as success")
+	}
+}

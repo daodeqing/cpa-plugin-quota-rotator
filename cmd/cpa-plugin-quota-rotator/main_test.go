@@ -48,7 +48,7 @@ func TestStatusResourceRouteReturnsHTML(t *testing.T) {
 			if err = json.Unmarshal(env.Result, &response); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(response.Headers.Get("Content-Type"), "text/html") || !strings.Contains(string(response.Body), "Smart Quota Rotator v1.2.4") {
+			if !strings.Contains(response.Headers.Get("Content-Type"), "text/html") || !strings.Contains(string(response.Body), "Smart Quota Rotator v1.2.5") {
 				t.Fatal("resource page missing")
 			}
 		})
